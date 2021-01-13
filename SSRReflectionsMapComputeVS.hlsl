@@ -1,14 +1,7 @@
-cbuffer AmbientMapComputeCB : register(b0)
+cbuffer ConstantBuffer : register(b0)
 {
-	float4x4 gProjTexture;
-	float4   gSampleOffset[14];
 	float4   gFrustumFarCorner[4];
-
-	// coordinates given in view space
-	float    gOcclusionRadius;
-	float    gOcclusionFadeStart;
-	float    gOcclusionFadeEnd;
-	float    gSurfaceEpsilon;
+	float4x4 gProj;
 };
 
 struct VertexIn

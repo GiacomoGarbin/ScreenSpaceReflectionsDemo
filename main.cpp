@@ -4,6 +4,306 @@
 #include <string>
 #include <sstream>
 
+class SSR
+{
+public:
+	UINT mWidth;
+	UINT mHeight;
+
+	D3D11_VIEWPORT mReflectionsMapViewport;
+	ID3D11RenderTargetView* mReflectionsMapRTV;
+	ID3D11ShaderResourceView* mReflectionsMapSRV;
+	//ID3D11VertexShader* mVertexShader;
+	//ID3D11InputLayout* mInputLayout;
+	//ID3D11PixelShader* mPixelShader;
+	ID3D11SamplerState* mSamplerState; // normal depth map
+
+	struct ConstantBuffer
+	{
+		XMFLOAT4 FrustumFarCorner[4];
+		XMFLOAT4X4 Proj;
+	};
+
+	static_assert((sizeof(ConstantBuffer) % 16) == 0, "constant buffer size must be 16-byte aligned");
+
+	XMFLOAT4 mFrustumFarCorner[4];
+	ID3D11Buffer* mConstantBuffer;
+
+	GameObject mReflectionsMapQuad;
+	DebugQuad mDebugQuad;
+
+	SSR();
+	~SSR();
+
+	void Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ);
+	void OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ);
+
+	void ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV);
+};
+
+SSR::SSR() :
+	mReflectionsMapRTV(nullptr),
+	mReflectionsMapSRV(nullptr),
+	//mVertexShader(nullptr),
+	//mInputLayout(nullptr),
+	//mPixelShader(nullptr),
+	mSamplerState(nullptr),
+	mConstantBuffer(nullptr)
+{}
+
+SSR::~SSR()
+{
+	SafeRelease(mReflectionsMapRTV);
+	SafeRelease(mReflectionsMapSRV);
+	//SafeRelease(mVertexShader);
+	//SafeRelease(mInputLayout);
+	//SafeRelease(mPixelShader);
+	SafeRelease(mSamplerState);
+	SafeRelease(mConstantBuffer);
+}
+
+void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ)
+{
+	OnResize(device, width, height, FieldOfViewY, FarZ);
+
+	GeometryGenerator::CreateScreenQuad(mReflectionsMapQuad.mMesh);
+
+	// store far plane frustum corner indices in normal.x
+	mReflectionsMapQuad.mMesh.mVertices[0].mNormal = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	mReflectionsMapQuad.mMesh.mVertices[1].mNormal = XMFLOAT3(1.0f, 0.0f, 0.0f);
+	mReflectionsMapQuad.mMesh.mVertices[2].mNormal = XMFLOAT3(2.0f, 0.0f, 0.0f);
+	mReflectionsMapQuad.mMesh.mVertices[3].mNormal = XMFLOAT3(3.0f, 0.0f, 0.0f);
+
+	// vertex buffer
+	{
+		D3D11_BUFFER_DESC desc;
+		desc.ByteWidth = sizeof(GeometryGenerator::Vertex) * mReflectionsMapQuad.mMesh.mVertices.size();
+		desc.Usage = D3D11_USAGE_IMMUTABLE;
+		desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+		desc.StructureByteStride = 0;
+
+		D3D11_SUBRESOURCE_DATA InitData;
+		InitData.pSysMem = mReflectionsMapQuad.mMesh.mVertices.data();
+		InitData.SysMemPitch = 0;
+		InitData.SysMemSlicePitch = 0;
+
+		HR(device->CreateBuffer(&desc, &InitData, &mReflectionsMapQuad.mVertexBuffer));
+	}
+
+	// index buffer
+	{
+		D3D11_BUFFER_DESC desc;
+		desc.ByteWidth = sizeof(UINT) * mReflectionsMapQuad.mMesh.mIndices.size();
+		desc.Usage = D3D11_USAGE_IMMUTABLE;
+		desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+		desc.StructureByteStride = 0;
+
+		D3D11_SUBRESOURCE_DATA InitData;
+		InitData.pSysMem = mReflectionsMapQuad.mMesh.mIndices.data();
+		InitData.SysMemPitch = 0;
+		InitData.SysMemSlicePitch = 0;
+
+		HR(device->CreateBuffer(&desc, &InitData, &mReflectionsMapQuad.mIndexBuffer));
+	}
+
+	// VS
+	{
+		std::wstring path = L"SSRReflectionsMapComputeVS.hlsl";
+
+		ID3DBlob* pCode;
+		HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "vs_5_0", 0, 0, &pCode, nullptr));
+		HR(device->CreateVertexShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mReflectionsMapQuad.mVertexShader));
+
+		// input layout
+		{
+			std::vector<D3D11_INPUT_ELEMENT_DESC> desc =
+			{
+				{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+				{"NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+				{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 36, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			};
+
+			HR(device->CreateInputLayout(desc.data(), desc.size(), pCode->GetBufferPointer(), pCode->GetBufferSize(), &mReflectionsMapQuad.mInputLayout));
+		}
+	}
+
+	// PS
+	{
+		std::wstring path = L"SSRReflectionsMapComputePS.hlsl";
+
+		ID3DBlob* pCode;
+		HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "ps_5_0", 0, 0, &pCode, nullptr));
+		HR(device->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mReflectionsMapQuad.mPixelShader));
+	}
+
+	// sampler state
+	{
+		D3D11_SAMPLER_DESC desc;
+		desc.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+		desc.AddressU = D3D11_TEXTURE_ADDRESS_BORDER;
+		desc.AddressV = D3D11_TEXTURE_ADDRESS_BORDER;
+		desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+		desc.MipLODBias = 0;
+		desc.MaxAnisotropy = 1;
+		desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+		FLOAT BorderColor[4] = { 0.0f, 0.0f, 0.0f, 1e5f };
+		CopyMemory(desc.BorderColor, BorderColor, sizeof(desc.BorderColor));
+		desc.MinLOD = 0;
+		desc.MaxLOD = 0;
+
+		HR(device->CreateSamplerState(&desc, &mSamplerState));
+	}
+
+	// constant buffer
+	{
+		D3D11_BUFFER_DESC desc;
+		desc.ByteWidth = sizeof(ConstantBuffer);
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+		desc.StructureByteStride = 0;
+
+		HR(device->CreateBuffer(&desc, nullptr, &mConstantBuffer));
+	}
+}
+
+void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ)
+{
+	mWidth = width;
+	mHeight = height;
+
+	// render to reflections map at half the resolution
+	mReflectionsMapViewport.TopLeftX = 0.0f;
+	mReflectionsMapViewport.TopLeftY = 0.0f;
+	mReflectionsMapViewport.Width = mWidth; // / 2.0f;
+	mReflectionsMapViewport.Height = mHeight; // / 2.0f;
+	mReflectionsMapViewport.MinDepth = 0.0f;
+	mReflectionsMapViewport.MaxDepth = 1.0f;
+
+	// frustum far corners
+	{
+		float aspect = (float)mWidth / (float)mHeight;
+
+		float HalfHeight = FarZ * tanf(0.5f * FieldOfViewY);
+		float HalfWidth = aspect * HalfHeight;
+
+		mFrustumFarCorner[0] = XMFLOAT4(-HalfWidth, -HalfHeight, FarZ, 0.0f);
+		mFrustumFarCorner[1] = XMFLOAT4(-HalfWidth, +HalfHeight, FarZ, 0.0f);
+		mFrustumFarCorner[2] = XMFLOAT4(+HalfWidth, +HalfHeight, FarZ, 0.0f);
+		mFrustumFarCorner[3] = XMFLOAT4(+HalfWidth, -HalfHeight, FarZ, 0.0f);
+	}
+
+	// reflections map RTV and SRV
+	{
+		// render to ambient map at half the resolution
+		D3D11_TEXTURE2D_DESC desc;
+		desc.Width = mWidth; // / 2;
+		desc.Height = mHeight; // / 2;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+
+		SafeRelease(mReflectionsMapRTV);
+		SafeRelease(mReflectionsMapSRV);
+
+		ID3D11Texture2D* texture = nullptr;
+		HR(device->CreateTexture2D(&desc, nullptr, &texture));
+
+		HR(device->CreateRenderTargetView(texture, nullptr, &mReflectionsMapRTV));
+		HR(device->CreateShaderResourceView(texture, nullptr, &mReflectionsMapSRV));
+
+		SafeRelease(texture);
+	}
+}
+
+void SSR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV)
+{
+	// bind the reflections map as the render target
+	// do not bind a depth/stencil buffer -> no depth test is performed
+	context->OMSetRenderTargets(1, &mReflectionsMapRTV, nullptr);
+	context->ClearRenderTargetView(mReflectionsMapRTV, Colors::Black);
+	context->RSSetViewports(1, &mReflectionsMapViewport);
+
+	// shaders
+	context->VSSetShader(mReflectionsMapQuad.mVertexShader.Get(), nullptr, 0);
+	context->PSSetShader(mReflectionsMapQuad.mPixelShader.Get(), nullptr, 0);
+	// input layout
+	context->IASetInputLayout(mReflectionsMapQuad.mInputLayout.Get());
+
+	// primitive topology
+	context->IASetPrimitiveTopology(mReflectionsMapQuad.mPrimitiveTopology);
+
+	// vertex and index buffers
+	{
+		UINT stride = sizeof(GeometryGenerator::Vertex);
+		UINT offset = 0;
+
+		context->IASetVertexBuffers(0, 1, mReflectionsMapQuad.mVertexBuffer.GetAddressOf(), &stride, &offset);
+		context->IASetIndexBuffer(mReflectionsMapQuad.mIndexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
+	}
+
+	// update and bind CBs
+	{
+		ConstantBuffer buffer;
+
+		for (UINT i = 0; i < 4; ++i) buffer.FrustumFarCorner[i] = mFrustumFarCorner[i];
+		XMStoreFloat4x4(&buffer.Proj, camera.mProj);
+
+		context->UpdateSubresource(mConstantBuffer, 0, 0, &buffer, 0, 0);
+
+		context->VSSetConstantBuffers(0, 1, &mConstantBuffer);
+		context->PSSetConstantBuffers(0, 1, &mConstantBuffer);
+	}
+
+	// bind SRVs
+	{
+		context->PSSetShaderResources(0, 1, &NormalDepthSRV);
+	}
+
+	// bind SSs
+	{
+		context->PSSetSamplers(2, 1, &mSamplerState);
+	}
+
+	// rasterizer, blend and depth-stencil states
+	{
+		FLOAT BlendFactor[] = { 0, 0, 0, 0 };
+
+		context->RSSetState(mReflectionsMapQuad.mRasterizerState.Get());
+		context->OMSetBlendState(mReflectionsMapQuad.mBlendState.Get(), BlendFactor, 0xFFFFFFFF);
+		context->OMSetDepthStencilState(mReflectionsMapQuad.mDepthStencilState.Get(), mReflectionsMapQuad.mStencilRef);
+	}
+
+	// draw call
+	context->DrawIndexed(mReflectionsMapQuad.mMesh.mIndices.size(), mReflectionsMapQuad.mIndexStart, mReflectionsMapQuad.mVertexStart);
+
+	// unbind SRVs
+	{
+		ID3D11ShaderResourceView* const NullSRVs[1] = { nullptr };
+		context->PSSetShaderResources(0, 1, NullSRVs);
+	}
+
+	// unbind SSs
+	{
+		ID3D11SamplerState* const NullSSs[1] = { nullptr };
+		context->PSSetSamplers(2, 1, NullSSs);
+	}
+
+	// unbind render target
+	context->OMSetRenderTargets(0, nullptr, nullptr);
+}
+
 class TestApp : public D3DApp
 {
 public:
@@ -100,6 +400,10 @@ public:
 
 	void DrawSceneToShadowMap();
 	void DrawSceneToSSAONormalDepthMap();
+
+	SSR mSSR;
+
+	//void DrawSceneToReflectionsMap();
 };
 
 TestApp::TestApp() :
@@ -743,6 +1047,9 @@ bool TestApp::Init()
 	mSSAO.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
 	mSSAO.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::ScreenCorner::BottomRight, AspectRatio());
 
+	mSSR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
+	mSSR.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::ScreenCorner::TopRight, AspectRatio());
+
 	//// scene bounds
 	//if (!mObjectInstances.empty())
 	//{
@@ -1233,17 +1540,24 @@ void TestApp::DrawScene()
 		mContext->ClearRenderTargetView(mSSAO.GetAmbientMapRTV(), Colors::White);
 	}
 
+	// SSR
+	{
+		mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
+	}
+
 	// restore back and depth buffers, and viewport
-	mContext->OMSetRenderTargets(1, &mRenderTargetView, mDepthStencilView);
+	//mContext->OMSetRenderTargets(1, &mRenderTargetView, mDepthStencilView);
 	mContext->RSSetViewports(1, &mViewport);
 
-	mContext->ClearRenderTargetView(mRenderTargetView, Colors::Silver);
+	//mContext->ClearRenderTargetView(mRenderTargetView, Colors::Silver);
 	//mContext->ClearDepthStencilView(mDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
 	//mContext->OMSetDepthStencilState(mEqualDSS.Get(), 0);
 
 	// bind shadow map and ambient map as SRV
 	mContext->PSSetShaderResources(3, 1, &mShadowMap.GetSRV());
 	mContext->PSSetShaderResources(4, 1, &mSSAO.GetAmbientMapSRV());
+	// bind reflections map SRV
+	mContext->PSSetShaderResources(5, 1, &mSSR.mReflectionsMapSRV);
 
 	auto SetPerFrameCB = [this]() -> void
 	{
@@ -1389,154 +1703,178 @@ void TestApp::DrawScene()
 
 	SetPerFrameCB();
 
-	// draw without reflection
+	auto DrawSceneTo = [this, &DrawGameObject](ID3D11RenderTargetView* rtv)
 	{
-		DrawGameObject(&mGrid);
-		DrawGameObject(&mBox);
+		mContext->OMSetRenderTargets(1, &rtv, mDepthStencilView);
+		mContext->RSSetViewports(1, &mViewport);
 
-		for (UINT i = 0; i < 5; ++i)
+		mContext->ClearRenderTargetView(rtv, Colors::Silver);
+
+		// draw without reflection
 		{
-			mCylinder.mWorld = XMMatrixTranslation(-5, 1.5f, -10 + i * 5.0f);
-			DrawGameObject(&mCylinder);
-			mCylinder.mWorld = XMMatrixTranslation(+5, 1.5f, -10 + i * 5.0f);
-			DrawGameObject(&mCylinder);
-		}
-	}
+			DrawGameObject(&mGrid);
+			DrawGameObject(&mBox);
 
-	// turn off tessellation
-
-	// draw with reflection
-	{
-		// bind cube map SRV
-		mContext->PSSetShaderResources(2, 1, &mSky.mAlbedoSRV);
-
-		DrawGameObject(&mSkull);
-
-		for (UINT i = 0; i < 5; ++i)
-		{
-			mSphere.mWorld = XMMatrixTranslation(-5, 3.5f, -10 + i * 5.0f);
-			DrawGameObject(&mSphere);
-			mSphere.mWorld = XMMatrixTranslation(+5, 3.5f, -10 + i * 5.0f);
-			DrawGameObject(&mSphere);
-		}
-
-		// unbind SRV
-		ID3D11ShaderResourceView* const NullSRV = nullptr;
-		mContext->PSSetShaderResources(2, 1, &NullSRV);
-	}
-
-	// draw animated characters
-	for (GameObjectInstance* instance : mObjectInstances)
-	{
-		GameObject* obj = instance->obj;
-
-		// shaders
-		{
-			mContext->VSSetShader(obj->mVertexShader.Get(), nullptr, 0);
-			mContext->PSSetShader(obj->mPixelShader.Get(), nullptr, 0);
-		}
-
-		// input layout
-		mContext->IASetInputLayout(obj->mInputLayout.Get());
-
-		// primitive topology
-		mContext->IASetPrimitiveTopology(obj->mPrimitiveTopology);
-
-		// vertex and index buffers
-		{
-			UINT stride = sizeof(GeometryGenerator::Vertex);
-			UINT offset = 0;
-
-			mContext->IASetVertexBuffers(0, 1, obj->mVertexBuffer.GetAddressOf(), &stride, &offset);
-			mContext->IASetIndexBuffer(obj->mIndexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
-		}
-
-		// rasterizer, blend and depth-stencil states
-		{
-			if (IsKeyPressed(GLFW_KEY_1))
+			for (UINT i = 0; i < 5; ++i)
 			{
-				mContext->RSSetState(mWireframeRS.Get());
-			}
-			else
-			{
-				mContext->RSSetState(obj->mRasterizerState.Get());
-			}
-
-			FLOAT BlendFactor[] = { 0, 0, 0, 0 };
-			mContext->OMSetBlendState(obj->mBlendState.Get(), BlendFactor, 0xFFFFFFFF);
-
-			if (obj->mDepthStencilState.Get() != nullptr || IsKeyPressed(GLFW_KEY_1))
-			{
-				mContext->OMSetDepthStencilState(obj->mDepthStencilState.Get(), obj->mStencilRef);
-			}
-			else
-			{
-				mContext->OMSetDepthStencilState(mEqualDSS.Get(), 0);
+				mCylinder.mWorld = XMMatrixTranslation(-5, 1.5f, -10 + i * 5.0f);
+				DrawGameObject(&mCylinder);
+				mCylinder.mWorld = XMMatrixTranslation(+5, 1.5f, -10 + i * 5.0f);
+				DrawGameObject(&mCylinder);
 			}
 		}
 
-		// per skinned constant buffer
-		{
-			PerSkinnedCB buffer;
-			ZeroMemory(&buffer.mBoneTransforms, sizeof(buffer.mBoneTransforms));
-			CopyMemory(&buffer.mBoneTransforms, instance->transforms.data(), instance->transforms.size() * sizeof(XMFLOAT4X4));
+		// turn off tessellation
 
-			mContext->UpdateSubresource(mPerSkinnedCB, 0, 0, &buffer, 0, 0);
-			mContext->VSSetConstantBuffers(2, 1, &mPerSkinnedCB);
+		// draw with reflection
+		{
+			// bind cube map SRV
+			mContext->PSSetShaderResources(2, 1, &mSky.mAlbedoSRV);
+
+			DrawGameObject(&mSkull);
+
+			for (UINT i = 0; i < 5; ++i)
+			{
+				mSphere.mWorld = XMMatrixTranslation(-5, 3.5f, -10 + i * 5.0f);
+				DrawGameObject(&mSphere);
+				mSphere.mWorld = XMMatrixTranslation(+5, 3.5f, -10 + i * 5.0f);
+				DrawGameObject(&mSphere);
+			}
+
+			// unbind SRV
+			ID3D11ShaderResourceView* const NullSRV = nullptr;
+			mContext->PSSetShaderResources(2, 1, &NullSRV);
 		}
 
-		XMMATRIX W = instance->world;
-		XMMATRIX V = XMLoadFloat4x4(&mCamera.mView);
-		XMMATRIX WorldViewProj = W * V * mCamera.mProj;
-		XMMATRIX S = XMLoadFloat4x4(&mShadowMap.mShadowTransform);
-		XMMATRIX WorldInverseTranspose = GameMath::InverseTranspose(W);
-
-		// transform NDC space [-1,+1]^2 to texture space [0,1]^2
-		XMMATRIX T
-		(
-			+0.5f, 0.0f, 0.0f, 0.0f,
-			0.0f, -0.5f, 0.0f, 0.0f,
-			0.0f, 0.0f, 1.0f, 0.0f,
-			+0.5f, +0.5f, 0.0f, 1.0f
-		);
-
-		for (UINT i = 0; i < obj->mSubsets.size(); ++i)
+		// draw animated characters
+		for (GameObjectInstance* instance : mObjectInstances)
 		{
-			// per object constant buffer
+			GameObject* obj = instance->obj;
+
+			// shaders
 			{
-				PerObjectCB buffer;
-				XMStoreFloat4x4(&buffer.mWorld, W);
-				XMStoreFloat4x4(&buffer.mWorldInverseTranspose, WorldInverseTranspose);
-				XMStoreFloat4x4(&buffer.mWorldViewProj, WorldViewProj);
-				buffer.mMaterial = obj->mMaterials[i];
-				XMStoreFloat4x4(&buffer.mTexCoordTransform, obj->mTexCoordTransform);
-				XMStoreFloat4x4(&buffer.mShadowTransform, W * S);
-				XMStoreFloat4x4(&buffer.mWorldViewProjTexture, WorldViewProj * T);
-
-				mContext->UpdateSubresource(mPerObjectCB, 0, 0, &buffer, 0, 0);
-
-				mContext->VSSetConstantBuffers(0, 1, &mPerObjectCB);
-				mContext->PSSetConstantBuffers(0, 1, &mPerObjectCB);
+				mContext->VSSetShader(obj->mVertexShader.Get(), nullptr, 0);
+				mContext->PSSetShader(obj->mPixelShader.Get(), nullptr, 0);
 			}
 
-			// bind SRVs
+			// input layout
+			mContext->IASetInputLayout(obj->mInputLayout.Get());
+
+			// primitive topology
+			mContext->IASetPrimitiveTopology(obj->mPrimitiveTopology);
+
+			// vertex and index buffers
 			{
-				mContext->PSSetShaderResources(0, 1, &obj->mDiffuseMapSRVs[i]);
-				mContext->PSSetShaderResources(1, 1, &obj->mNormalMapSRVs[i]);
+				UINT stride = sizeof(GeometryGenerator::Vertex);
+				UINT offset = 0;
+
+				mContext->IASetVertexBuffers(0, 1, obj->mVertexBuffer.GetAddressOf(), &stride, &offset);
+				mContext->IASetIndexBuffer(obj->mIndexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
 			}
 
-			// draw call
-			const Subset& subset = obj->mSubsets[i];
-			mContext->DrawIndexed(subset.FaceCount * 3, obj->mIndexStart + subset.FaceStart * 3, obj->mVertexStart);
-
-
-			// unbind SRVs
+			// rasterizer, blend and depth-stencil states
 			{
-				ID3D11ShaderResourceView* const NullSRVs[2] = { nullptr, nullptr };
-				mContext->PSSetShaderResources(0, 2, NullSRVs);
+				if (IsKeyPressed(GLFW_KEY_1))
+				{
+					mContext->RSSetState(mWireframeRS.Get());
+				}
+				else
+				{
+					mContext->RSSetState(obj->mRasterizerState.Get());
+				}
+
+				FLOAT BlendFactor[] = { 0, 0, 0, 0 };
+				mContext->OMSetBlendState(obj->mBlendState.Get(), BlendFactor, 0xFFFFFFFF);
+
+				if (obj->mDepthStencilState.Get() != nullptr || IsKeyPressed(GLFW_KEY_1))
+				{
+					mContext->OMSetDepthStencilState(obj->mDepthStencilState.Get(), obj->mStencilRef);
+				}
+				else
+				{
+					mContext->OMSetDepthStencilState(mEqualDSS.Get(), 0);
+				}
+			}
+
+			// per skinned constant buffer
+			{
+				PerSkinnedCB buffer;
+				ZeroMemory(&buffer.mBoneTransforms, sizeof(buffer.mBoneTransforms));
+				CopyMemory(&buffer.mBoneTransforms, instance->transforms.data(), instance->transforms.size() * sizeof(XMFLOAT4X4));
+
+				mContext->UpdateSubresource(mPerSkinnedCB, 0, 0, &buffer, 0, 0);
+				mContext->VSSetConstantBuffers(2, 1, &mPerSkinnedCB);
+			}
+
+			XMMATRIX W = instance->world;
+			XMMATRIX V = XMLoadFloat4x4(&mCamera.mView);
+			XMMATRIX WorldViewProj = W * V * mCamera.mProj;
+			XMMATRIX S = XMLoadFloat4x4(&mShadowMap.mShadowTransform);
+			XMMATRIX WorldInverseTranspose = GameMath::InverseTranspose(W);
+
+			// transform NDC space [-1,+1]^2 to texture space [0,1]^2
+			XMMATRIX T
+			(
+				+0.5f, 0.0f, 0.0f, 0.0f,
+				0.0f, -0.5f, 0.0f, 0.0f,
+				0.0f, 0.0f, 1.0f, 0.0f,
+				+0.5f, +0.5f, 0.0f, 1.0f
+			);
+
+			for (UINT i = 0; i < obj->mSubsets.size(); ++i)
+			{
+				// per object constant buffer
+				{
+					PerObjectCB buffer;
+					XMStoreFloat4x4(&buffer.mWorld, W);
+					XMStoreFloat4x4(&buffer.mWorldInverseTranspose, WorldInverseTranspose);
+					XMStoreFloat4x4(&buffer.mWorldViewProj, WorldViewProj);
+					buffer.mMaterial = obj->mMaterials[i];
+					XMStoreFloat4x4(&buffer.mTexCoordTransform, obj->mTexCoordTransform);
+					XMStoreFloat4x4(&buffer.mShadowTransform, W * S);
+					XMStoreFloat4x4(&buffer.mWorldViewProjTexture, WorldViewProj * T);
+
+					mContext->UpdateSubresource(mPerObjectCB, 0, 0, &buffer, 0, 0);
+
+					mContext->VSSetConstantBuffers(0, 1, &mPerObjectCB);
+					mContext->PSSetConstantBuffers(0, 1, &mPerObjectCB);
+				}
+
+				// bind SRVs
+				{
+					mContext->PSSetShaderResources(0, 1, &obj->mDiffuseMapSRVs[i]);
+					mContext->PSSetShaderResources(1, 1, &obj->mNormalMapSRVs[i]);
+				}
+
+				// draw call
+				const Subset& subset = obj->mSubsets[i];
+				mContext->DrawIndexed(subset.FaceCount * 3, obj->mIndexStart + subset.FaceStart * 3, obj->mVertexStart);
+
+
+				// unbind SRVs
+				{
+					ID3D11ShaderResourceView* const NullSRVs[2] = { nullptr, nullptr };
+					mContext->PSSetShaderResources(0, 2, NullSRVs);
+				}
 			}
 		}
-	}
+
+		// draw sky
+		DrawGameObject(&mSky);
+	};
+
+	DrawSceneTo(mRenderTargetView);
+
+	// reset depth stencil state
+	mContext->OMSetDepthStencilState(nullptr, 0);
+
+	// unbind shadow map and ambient map as SRV
+	ID3D11ShaderResourceView* const NullSRVs[2] = { nullptr, nullptr };
+	mContext->PSSetShaderResources(3, 2, NullSRVs);
+
+	// unbind reflections map as SRV
+	ID3D11ShaderResourceView* const NullSRV[1] = { nullptr };
+	mContext->PSSetShaderResources(5, 1, NullSRV);
 
 	if (IsKeyPressed(GLFW_KEY_2))
 	{
@@ -1549,15 +1887,10 @@ void TestApp::DrawScene()
 		//mSSAO.mDebugQuad.Draw(mContext, mSSAO.GetNormalDepthSRV());
 	}
 
-	// draw sky
-	DrawGameObject(&mSky);
-
-	// reset depth stencil state
-	mContext->OMSetDepthStencilState(nullptr, 0);
-
-	// unbind shadow map and ambient map as SRV
-	ID3D11ShaderResourceView* const NullSRV[2] = { nullptr, nullptr };
-	mContext->PSSetShaderResources(3, 2, NullSRV);
+	if (IsKeyPressed(GLFW_KEY_5))
+	{
+		mSSR.mDebugQuad.Draw(mContext, mSSR.mReflectionsMapSRV);
+	}
 
 	mSwapChain->Present(0, 0);
 }
