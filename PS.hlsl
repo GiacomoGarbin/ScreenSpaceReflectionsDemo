@@ -80,6 +80,10 @@ Texture2D gNormalTexture : register(t1);
 TextureCube gCubeMap : register(t2);
 Texture2D gShadowTexture : register(t3);
 Texture2D gAmbientTexture : register(t4);
+#if ENABLE_SSR
+Texture2D gReflectionsTexture : register(t5);
+Texture2D gSceneAlbedoTexture : register(t6);
+#endif // ENABLE_SSR
 
 SamplerState gLinearSamplerState : register(s0);
 SamplerComparisonState gShadowSamplerState : register(s1);
@@ -342,6 +346,23 @@ float4 main(VertexOut pin) : SV_TARGET
 		color += gMaterial.reflect * ReflectCol;
 #endif // ENABLE_REFLECTION
 
+#if ENABLE_SSR
+		{
+			//float2 scale = float2(1 / gTexCoordTransform._11, 1 / gTexCoordTransform._22);
+			//float2 TexCoord = scale * pin.TexCoord;
+
+
+			float2 TexSize;
+			gSceneAlbedoTexture.GetDimensions(TexSize.x, TexSize.y);
+			float2 TexCoord = pin.PositionH.xy / TexSize;
+
+			float3 RayPayload = gReflectionsTexture.Sample(gLinearSamplerState, TexCoord).rgb;
+			float4 ReflectCol = RayPayload.z ? gSceneAlbedoTexture.Sample(gLinearSamplerState, RayPayload.xy) : 0;
+			ReflectCol.a = 1;
+			color += gMaterial.reflect * ReflectCol;
+			//color = ReflectCol;
+		}
+#endif // ENABLE_SSR
 	}
 
 #if ENABLE_FOG

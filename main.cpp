@@ -15,7 +15,7 @@ public:
 	ID3D11ShaderResourceView* mReflectionsMapSRV;
 	//ID3D11VertexShader* mVertexShader;
 	//ID3D11InputLayout* mInputLayout;
-	//ID3D11PixelShader* mPixelShader;
+	ID3D11PixelShader* mPixelShader;
 	ID3D11SamplerState* mSamplerState; // normal depth map
 
 	struct ConstantBuffer
@@ -46,7 +46,7 @@ SSR::SSR() :
 	mReflectionsMapSRV(nullptr),
 	//mVertexShader(nullptr),
 	//mInputLayout(nullptr),
-	//mPixelShader(nullptr),
+	mPixelShader(nullptr),
 	mSamplerState(nullptr),
 	mConstantBuffer(nullptr)
 {}
@@ -57,7 +57,7 @@ SSR::~SSR()
 	SafeRelease(mReflectionsMapSRV);
 	//SafeRelease(mVertexShader);
 	//SafeRelease(mInputLayout);
-	//SafeRelease(mPixelShader);
+	SafeRelease(mPixelShader);
 	SafeRelease(mSamplerState);
 	SafeRelease(mConstantBuffer);
 }
@@ -138,6 +138,26 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 		ID3DBlob* pCode;
 		HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "ps_5_0", 0, 0, &pCode, nullptr));
 		HR(device->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mReflectionsMapQuad.mPixelShader));
+	}
+
+	// PS
+	{
+		std::wstring path = L"PS.hlsl";
+
+		std::vector<D3D_SHADER_MACRO> defines;
+		defines.push_back({ "ENABLE_TEXTURE",         "1" });
+		defines.push_back({ "ENABLE_SPHERE_TEXCOORD", "0" });
+		defines.push_back({ "ENABLE_NORMAL_MAPPING",  "1" });
+		defines.push_back({ "ENABLE_ALPHA_CLIPPING",  "0" });
+		//defines.push_back({ "ENABLE_LIGHTING",       "1" });
+		defines.push_back({ "ENABLE_REFLECTION",      "0" });
+		defines.push_back({ "ENABLE_SSR",             "1" });
+		defines.push_back({ "ENABLE_FOG",             "0" });
+		defines.push_back({ nullptr, nullptr });
+
+		ID3DBlob* pCode;
+		HR(D3DCompileFromFile(path.c_str(), defines.data(), nullptr, "main", "ps_5_0", 0, 0, &pCode, nullptr));
+		HR(device->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mPixelShader));
 	}
 
 	// sampler state
@@ -404,6 +424,10 @@ public:
 	SSR mSSR;
 
 	//void DrawSceneToReflectionsMap();
+
+	ID3D11RenderTargetView* mSceneAlbedoRTV;
+	ID3D11ShaderResourceView* mSceneAlbedoSRV;
+	DebugQuad mDebugQuad;
 };
 
 TestApp::TestApp() :
@@ -411,7 +435,10 @@ TestApp::TestApp() :
 	mPerFrameCB(nullptr),
 	mPerObjectCB(nullptr),
 	mPerSkinnedCB(nullptr),
-	mSamplerState(nullptr)
+	mSamplerState(nullptr),
+
+	mSceneAlbedoRTV(nullptr),
+	mSceneAlbedoSRV(nullptr)
 {
 	mMainWindowTitle = "SSR demo";
 
@@ -449,6 +476,9 @@ TestApp::~TestApp()
 	SafeRelease(mPerObjectCB);
 	SafeRelease(mPerSkinnedCB);
 	SafeRelease(mSamplerState);
+
+	SafeRelease(mSceneAlbedoRTV);
+	SafeRelease(mSceneAlbedoSRV);
 }
 
 bool TestApp::Init()
@@ -457,9 +487,6 @@ bool TestApp::Init()
 	{
 		return false;
 	}
-
-	//std::wstring base = L"C:/Users/ggarbin/Desktop/3D-Game-Programming-with-DirectX11/";
-	//std::wstring proj = L"Chapter 21 Shadow Mapping/";
 
 	std::wstring base = L"";
 	std::wstring proj = L"";
@@ -559,6 +586,7 @@ bool TestApp::Init()
 		defines.push_back({ "ENABLE_ALPHA_CLIPPING",  "0" });
 		//defines.push_back({ "ENABLE_LIGHTING",       "1" });
 		defines.push_back({ "ENABLE_REFLECTION",      "0" });
+		defines.push_back({ "ENABLE_SSR",             "0" });
 		defines.push_back({ "ENABLE_FOG",             "0" });
 		defines.push_back({ nullptr, nullptr });
 
@@ -695,7 +723,7 @@ bool TestApp::Init()
 		mGrid.mMaterial.mAmbient = XMFLOAT4(0.7f, 0.7f, 0.7f, 1.0f);
 		mGrid.mMaterial.mDiffuse = XMFLOAT4(0.6f, 0.6f, 0.6f, 1.0f);
 		mGrid.mMaterial.mSpecular = XMFLOAT4(0.4f, 0.4f, 0.4f, 16.0f);
-		mGrid.mMaterial.mReflect = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+		mGrid.mMaterial.mReflect = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 
 		//mGrid.mPrimitiveTopology = D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
 
@@ -1041,14 +1069,14 @@ bool TestApp::Init()
 	}
 
 	mShadowMap.Init(mDevice, 2048, 2048);
-	mShadowMap.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::ScreenCorner::BottomLeft, 1);
+	mShadowMap.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::BottomLeft, 1);
 	mContext->PSSetSamplers(1, 1, &mShadowMap.GetSS());
 
 	mSSAO.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
-	mSSAO.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::ScreenCorner::BottomRight, AspectRatio());
+	mSSAO.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::BottomRight, AspectRatio());
 
 	mSSR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
-	mSSR.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::ScreenCorner::TopRight, AspectRatio());
+	mSSR.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
 
 	//// scene bounds
 	//if (!mObjectInstances.empty())
@@ -1075,6 +1103,50 @@ bool TestApp::Init()
 	//	mSceneBounds.Radius = std::sqrt(RadiusSquared);
 	//}
 
+	{
+		// scene albedo RTV and SRV
+		{
+			SafeRelease(mSceneAlbedoRTV);
+			SafeRelease(mSceneAlbedoSRV);
+
+			D3D11_TEXTURE2D_DESC desc;
+			desc.Width = mMainWindowWidth;
+			desc.Height = mMainWindowHeight;
+			desc.MipLevels = 1;
+			desc.ArraySize = 1;
+			desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			desc.SampleDesc.Count = 1;
+			desc.SampleDesc.Quality = 0;
+			desc.Usage = D3D11_USAGE_DEFAULT;
+			desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+			desc.CPUAccessFlags = 0;
+			desc.MiscFlags = 0;
+
+			ID3D11Texture2D* texture = nullptr;
+			HR(mDevice->CreateTexture2D(&desc, nullptr, &texture));
+
+			HR(mDevice->CreateRenderTargetView(texture, nullptr, &mSceneAlbedoRTV));
+			HR(mDevice->CreateShaderResourceView(texture, nullptr, &mSceneAlbedoSRV));
+
+			SafeRelease(texture);
+		}
+
+		mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::FullWindow, AspectRatio());
+
+		// pixel shader
+		{
+			std::wstring path = L"DebugQuadPS.hlsl";
+
+			std::vector<D3D_SHADER_MACRO> defines;
+			defines.push_back({ "ENABLE_SSR", "1" });
+			defines.push_back({ nullptr, nullptr });
+
+			ID3DBlob* pCode;
+			HR(D3DCompileFromFile(path.c_str(), defines.data(), nullptr, "main", "ps_5_0", 0, 0, &pCode, nullptr));
+			HR(mDevice->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mDebugQuad.mPixelShader));
+		}
+	}
+
 	return true;
 }
 
@@ -1086,6 +1158,35 @@ void TestApp::OnResize(GLFWwindow* window, int width, int height)
 
 	mSSAO.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
 	mSSAO.mDebugQuad.OnResize(AspectRatio());
+
+	// scene albedo RTV and SRV
+	{
+		SafeRelease(mSceneAlbedoRTV);
+		SafeRelease(mSceneAlbedoSRV);
+
+		D3D11_TEXTURE2D_DESC desc;
+		desc.Width = mMainWindowWidth;
+		desc.Height = mMainWindowHeight;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+
+		ID3D11Texture2D* texture = nullptr;
+		HR(mDevice->CreateTexture2D(&desc, nullptr, &texture));
+
+		HR(mDevice->CreateRenderTargetView(texture, nullptr, &mSceneAlbedoRTV));
+		HR(mDevice->CreateShaderResourceView(texture, nullptr, &mSceneAlbedoSRV));
+
+		SafeRelease(texture);
+	}
+
+	mDebugQuad.OnResize(AspectRatio());
 }
 
 void TestApp::UpdateScene(float dt)
@@ -1556,8 +1657,6 @@ void TestApp::DrawScene()
 	// bind shadow map and ambient map as SRV
 	mContext->PSSetShaderResources(3, 1, &mShadowMap.GetSRV());
 	mContext->PSSetShaderResources(4, 1, &mSSAO.GetAmbientMapSRV());
-	// bind reflections map SRV
-	mContext->PSSetShaderResources(5, 1, &mSSR.mReflectionsMapSRV);
 
 	auto SetPerFrameCB = [this]() -> void
 	{
@@ -1815,9 +1914,9 @@ void TestApp::DrawScene()
 			// transform NDC space [-1,+1]^2 to texture space [0,1]^2
 			XMMATRIX T
 			(
-				+0.5f, 0.0f, 0.0f, 0.0f,
-				0.0f, -0.5f, 0.0f, 0.0f,
-				0.0f, 0.0f, 1.0f, 0.0f,
+				+0.5f,  0.0f, 0.0f, 0.0f,
+				 0.0f, -0.5f, 0.0f, 0.0f,
+				 0.0f,  0.0f, 1.0f, 0.0f,
 				+0.5f, +0.5f, 0.0f, 1.0f
 			);
 
@@ -1863,18 +1962,57 @@ void TestApp::DrawScene()
 		DrawGameObject(&mSky);
 	};
 
-	DrawSceneTo(mRenderTargetView);
+	DrawSceneTo(mSceneAlbedoRTV);
+
+	mContext->OMSetRenderTargets(0, nullptr, nullptr);
 
 	// reset depth stencil state
 	mContext->OMSetDepthStencilState(nullptr, 0);
+	
+	//{
+	//	mContext->OMSetRenderTargets(1, &mRenderTargetView, nullptr);
+	//	mContext->RSSetViewports(1, &mViewport);
+
+	//	mContext->ClearRenderTargetView(mRenderTargetView, Colors::Silver);
+	//}
+
+	{
+		mGrid.mPixelShader = mSSR.mPixelShader;
+
+		// bind reflections map and scene albedo map SRVs
+		ID3D11ShaderResourceView* const SRVs[2] = {
+			mSSR.mReflectionsMapSRV,
+			mSceneAlbedoSRV
+		};
+		mContext->PSSetShaderResources(5, 2, SRVs);
+	}
+
+	DrawSceneTo(mRenderTargetView);
+
+	{
+		mGrid.mPixelShader = mBox.mPixelShader;
+
+		// unbind reflections map and scene albedo map SRVs
+		ID3D11ShaderResourceView* const NullSRVs[2] = { nullptr, nullptr };
+		mContext->PSSetShaderResources(5, 2, NullSRVs);
+	}
 
 	// unbind shadow map and ambient map as SRV
 	ID3D11ShaderResourceView* const NullSRVs[2] = { nullptr, nullptr };
 	mContext->PSSetShaderResources(3, 2, NullSRVs);
 
-	// unbind reflections map as SRV
-	ID3D11ShaderResourceView* const NullSRV[1] = { nullptr };
-	mContext->PSSetShaderResources(5, 1, NullSRV);
+	// reset depth stencil state
+	mContext->OMSetDepthStencilState(nullptr, 0);
+
+	//// render scene with SSR
+	//{
+	//	std::vector<ID3D11ShaderResourceView*> SRVs = {
+	//		mSceneAlbedoSRV,
+	//		mSSR.mReflectionsMapSRV
+	//	};
+
+	//	mDebugQuad.Draw(mContext, SRVs);
+	//}
 
 	if (IsKeyPressed(GLFW_KEY_2))
 	{

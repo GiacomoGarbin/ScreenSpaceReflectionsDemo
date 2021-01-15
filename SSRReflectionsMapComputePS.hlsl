@@ -19,7 +19,7 @@ float3 GetFullViewPosition(float2 uv, float z)
 	// bilinear interpolation
 	float4 p0 = lerp(gFrustumFarCorner[0], gFrustumFarCorner[3], uv.x);
 	float4 p1 = lerp(gFrustumFarCorner[1], gFrustumFarCorner[2], uv.x);
-	float3 ToFarPlane = lerp(p0.xyz, p1.xyz, uv.y);
+	float3 ToFarPlane = lerp(p0.xyz, p1.xyz, 1 - uv.y);
 
 	return (z / ToFarPlane.z) * ToFarPlane;
 }
@@ -47,9 +47,9 @@ float4 main(VertexOut pin) : SV_Target
 	float3 p = GetFullViewPosition(pin.TexCoord, pz);
 
 	{
-		float MaxDistance = 5;
-		float resolution = 0.1f;
-		int   steps = 1;
+		float MaxDistance = 15;
+		float resolution = 0.3f;
+		int   steps = 10;
 		float thickness = 0.5f;
 
 		float2 TexSize;
@@ -78,15 +78,15 @@ float4 main(VertexOut pin) : SV_Target
 
 		float4 FragStart = float4(ViewStart, 1);
 		FragStart = mul(gProj, FragStart);
-		FragStart.xyz /= FragStart.w;
-		FragStart.xy = FragStart.xy * 0.5f + 0.5f;
+		FragStart.xy /= FragStart.w;
+		FragStart.xy = FragStart.xy * float2(+0.5f, -0.5f) + 0.5f;
 		//return float4(FragStart.xy, 0, 1);
 		FragStart.xy *= TexSize;
 
 		float4 FragEnd = float4(ViewEnd, 1);
 		FragEnd = mul(gProj, FragEnd);
-		FragEnd.xyz /= FragEnd.w;
-		FragEnd.xy = FragEnd.xy * 0.5f + 0.5f;
+		FragEnd.xy /= FragEnd.w;
+		FragEnd.xy = FragEnd.xy * float2(+0.5f, -0.5f) + 0.5f;
 		//return float4(FragEnd.xy, 0, 1);
 		FragEnd.xy *= TexSize;
 
@@ -132,9 +132,8 @@ float4 main(VertexOut pin) : SV_Target
 				search0 = search1;
 			}
 
-			++j;
-
-			if (j >= 10) break;
+			
+			if (++j >= 100) break;
 		}
 
 		search1 = search0 + ((search1 - search0) / 2);
@@ -163,8 +162,76 @@ float4 main(VertexOut pin) : SV_Target
 			}
 		}
 
-		return float4(uv.xy, 0, 1);
+		return float4(uv.xy, 1, 1);
 	}
 
 	return float4(p, 1);
 }
+
+struct RayPayload
+{
+	bool hit;
+	float2 TexCoord;
+};
+
+//float4 main(VertexOut pin) : SV_Target
+//{
+//	// view space normal and depth (z-coord) of this pixel
+//	float4 NormalDepth = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, pin.TexCoord, 0);
+//
+//	float3 n = NormalDepth.xyz;
+//	float pz = NormalDepth.w;
+//
+//	float3 p = GetFullViewPosition(pin.TexCoord, pz);
+//
+//
+//	float3 dir = normalize(p);
+//	float3 ReflectDir = normalize(reflect(dir, normalize(n)));
+//
+//
+//
+//	float3 CurrPosition = 0;
+//	float3 CurrTexCoord = 0;
+//
+//	float dl = 0.05f;
+//	float CurrLength = dl;
+//
+//	float DepthBias = 0.025f;
+//
+//	RayPayload payload;
+//	payload.hit = false;
+//	payload.TexCoord = float2(0, 0);
+//
+//	for (int i = 0; i < 512; ++i)
+//	{
+//		//if (!payload.hit)
+//		{
+//			CurrPosition = p + ReflectDir * CurrLength;
+//
+//			float4 temp = float4(CurrPosition, 1);
+//			temp = mul(gProj, temp);
+//			temp.xy /= temp.w;
+//			CurrTexCoord = float3(temp.xy * float2(+0.5f, -0.5f) + 0.5f, temp.z);
+//
+//			//CurrTexCoord = temp.z / temp.w;
+//			//return float4(CurrTexCoord, 1);
+//
+//
+//			// view space depth -> [0,INF)
+//			float CurrZ = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, CurrTexCoord.xy, 0).w;
+//
+//			if (abs(CurrPosition.z - CurrZ) < DepthBias)
+//			{
+//				payload.hit = true;
+//				payload.TexCoord = CurrTexCoord.xy;
+//				break;
+//			}
+//
+//			//float3 NextPosition = GetFullViewPosition(CurrTexCoord.xy, CurrZ);
+//			//CurrLength = length(p - NextPosition);
+//			CurrLength += dl;
+//		}
+//	}
+//
+//	return float4(payload.TexCoord, payload.hit ? 1 : 0, 1);
+//}
