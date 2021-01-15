@@ -356,10 +356,12 @@ float4 main(VertexOut pin) : SV_TARGET
 			gSceneAlbedoTexture.GetDimensions(TexSize.x, TexSize.y);
 			float2 TexCoord = pin.PositionH.xy / TexSize;
 
-			float3 RayPayload = gReflectionsTexture.Sample(gLinearSamplerState, TexCoord).rgb;
-			float4 ReflectCol = RayPayload.z ? gSceneAlbedoTexture.Sample(gLinearSamplerState, RayPayload.xy) : 0;
-			ReflectCol.a = 1;
-			color += gMaterial.reflect * ReflectCol;
+			float4 RayPayload = gReflectionsTexture.Sample(gLinearSamplerState, TexCoord);
+			//float4 ReflectCol = RayPayload.z ? gSceneAlbedoTexture.Sample(gLinearSamplerState, RayPayload.xy) : 0;
+			float4 ReflectCol = gSceneAlbedoTexture.Sample(gLinearSamplerState, RayPayload.xy);
+			//ReflectCol.a = 1;
+			//color += gMaterial.reflect * ReflectCol;
+			color += gMaterial.reflect * float4(lerp(float3(0,0,0), ReflectCol.rgb, RayPayload.w), 1);
 			//color = ReflectCol;
 		}
 #endif // ENABLE_SSR

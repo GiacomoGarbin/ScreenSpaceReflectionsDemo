@@ -32,72 +32,72 @@ float3 GetFullViewPosition(float2 uv)
 
 // https://github.com/FlaxEngine/FlaxEngine/blob/master/Source/Shaders/SSR.shader
 
-float4 main(VertexOut pin) : SV_Target
+float4 main(VertexOut pin) : sv_target
 {
 	// view space normal and depth (z-coord) of this pixel
-	float4 NormalDepth = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, pin.TexCoord, 0);
+	float4 normaldepth = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, pin.TexCoord, 0);
 
-	float3 n = NormalDepth.xyz;
-	float pz = NormalDepth.w;
+	float3 n = normaldepth.xyz;
+	float pz = normaldepth.w;
 
 	// reconstruct full view space position (x,y,z)
-	// find t such that p = t*pin.ToFarPlane
-	// p.z = t*pin.ToFarPlane.z ==> t = p.z / pin.ToFarPlane.z
-	//float3 p = (pz / pin.ToFarPlane.z) * pin.ToFarPlane;
+	// find t such that p = t*pin.tofarplane
+	// p.z = t*pin.tofarplane.z ==> t = p.z / pin.tofarplane.z
+	//float3 p = (pz / pin.tofarplane.z) * pin.tofarplane;
 	float3 p = GetFullViewPosition(pin.TexCoord, pz);
 
 	{
-		float MaxDistance = 15;
-		float resolution = 0.3f;
-		int   steps = 10;
+		float maxdistance = 100;
+		float resolution = 1;
+		int   steps = 100;
 		float thickness = 0.5f;
 
-		float2 TexSize;
-		gNormalDepthMap.GetDimensions(TexSize.x, TexSize.y);
-		float2 TexCoord = pin.PositionH.xy / TexSize;
+		float2 texsize;
+		gNormalDepthMap.GetDimensions(texsize.x, texsize.y);
+		float2 texcoord = pin.PositionH.xy / texsize;
 
-		//return float4(TexCoord, 0, 1);
+		//return float4(texcoord, 0, 1);
 
-		float3 PositionFrom = p;
-		float3 PositionFromUnit = normalize(PositionFrom);
+		float3 positionfrom = p;
+		float3 positionfromunit = normalize(positionfrom);
 		float3 normal = normalize(n);
-		float3 pivot = normalize(reflect(PositionFromUnit, normal));
+		float3 pivot = normalize(reflect(positionfromunit, normal));
 
-		float3 PositionTo = PositionFrom;
+		float3 positionto = positionfrom;
 
-		//return float4(PositionFrom, 1);
-		//return float4(PositionFromUnit, 1);
+		//return float4(positionfrom, 1);
+		//return float4(positionfromunit, 1);
 		//return float4(normal, 1);
 		//return float4(pivot, 1);
-		//return float4(PositionTo, 1);
+		//return float4(positionto, 1);
 
 		float4 uv = 0;
 
-		float3 ViewStart = PositionFrom + pivot * 0;
-		float3 ViewEnd   = PositionFrom + pivot * MaxDistance;
+		float3 viewstart = positionfrom + pivot * 0;
+		float3 viewend   = positionfrom + pivot * maxdistance;
 
-		float4 FragStart = float4(ViewStart, 1);
-		FragStart = mul(gProj, FragStart);
-		FragStart.xy /= FragStart.w;
-		FragStart.xy = FragStart.xy * float2(+0.5f, -0.5f) + 0.5f;
-		//return float4(FragStart.xy, 0, 1);
-		FragStart.xy *= TexSize;
+		float4 fragstart = float4(viewstart, 1);
+		fragstart = mul(gProj, fragstart);
+		fragstart.xy /= fragstart.w;
+		fragstart.xy = fragstart.xy * float2(+0.5f, -0.5f) + 0.5f;
+		//return float4(fragstart.xy, 0, 1);
+		fragstart.xy *= texsize;
 
-		float4 FragEnd = float4(ViewEnd, 1);
-		FragEnd = mul(gProj, FragEnd);
-		FragEnd.xy /= FragEnd.w;
-		FragEnd.xy = FragEnd.xy * float2(+0.5f, -0.5f) + 0.5f;
-		//return float4(FragEnd.xy, 0, 1);
-		FragEnd.xy *= TexSize;
+		float4 fragend = float4(viewend, 1);
+		fragend = mul(gProj, fragend);
+		fragend.xy /= fragend.w;
+		fragend.xy = fragend.xy * float2(+0.5f, -0.5f) + 0.5f;
+		//return float4(fragend.xy, 0, 1);
+		fragend.xy *= texsize;
 
-		float2 frag = FragStart.xy;
-		uv.xy = frag / TexSize;
+		float2 frag = fragstart.xy;
+		uv.xy = frag / texsize;
 
-		float DeltaX = FragEnd.x - FragStart.x;
-		float DeltaY = FragEnd.y - FragStart.y;
-		float UseX = abs(DeltaX) >= abs(DeltaY) ? 1 : 0;
-		float delta = lerp(abs(DeltaY), abs(DeltaX), UseX) * clamp(resolution, 0, 1);
-		float2 increment = float2(DeltaX, DeltaY) / max(delta, 0.001f);
+		float deltax = fragend.x - fragstart.x;
+		float deltay = fragend.y - fragstart.y;
+		float usex = abs(deltax) >= abs(deltay) ? 1 : 0;
+		float delta = lerp(abs(deltay), abs(deltax), usex) * clamp(resolution, 0, 1);
+		float2 increment = float2(deltax, deltay) / max(delta, 0.001f);
 
 		float search0 = 0;
 		float search1 = 0;
@@ -105,7 +105,7 @@ float4 main(VertexOut pin) : SV_Target
 		int hit0 = 0;
 		int hit1 = 0;
 
-		float ViewDistance = ViewStart.z;
+		float viewdistance = viewstart.z;
 		float depth = thickness;
 
 		int j = 0;
@@ -113,14 +113,18 @@ float4 main(VertexOut pin) : SV_Target
 		for (int i = 0; i < int(delta); ++i)
 		{
 			frag += increment;
-			uv.xy = frag / TexSize;
-			PositionTo = GetFullViewPosition(uv.xy);
+			uv.xy = frag / texsize;
 
-			search1 = lerp((frag.y - FragStart.y) / DeltaY, (frag.x - FragStart.x) / DeltaX, UseX);
+			if (any(uv.xy < float2(0, 0)) || any(uv.xy > float2(1, 1))) break;
+
+			positionto = GetFullViewPosition(uv.xy);
+
+			search1 = lerp((frag.y - fragstart.y) / deltay, (frag.x - fragstart.x) / deltax, usex);
 			search1 = clamp(search1, 0, 1);
 
-			ViewDistance = (ViewStart.z * ViewEnd.z) / lerp(ViewEnd.z, ViewStart.z, search1);
-			depth = ViewDistance - PositionTo.z;
+			viewdistance = (viewstart.z * viewend.z) / lerp(viewend.z, viewstart.z, search1);
+			//viewdistance = (viewstart.z * viewend.z) / lerp(viewstart.z, viewend.z, search1);
+			depth = viewdistance - positionto.z;
 
 			if (depth > 0 && depth < thickness)
 			{
@@ -131,23 +135,29 @@ float4 main(VertexOut pin) : SV_Target
 			{
 				search0 = search1;
 			}
-
 			
-			if (++j >= 100) break;
+			//if (++j >= 400) break;
 		}
+
+		//return float4(uv.xy, hit0, 1);
 
 		search1 = search0 + ((search1 - search0) / 2);
 
 		steps *= hit0;
 
+		//thickness = 1;
+
 		for (int i = 0; i < steps; ++i)
 		{
-			frag = lerp(FragStart.xy, FragEnd.xy, search1);
-			uv.xy = frag / TexSize;
-			PositionTo = GetFullViewPosition(uv.xy);
+			frag = lerp(fragstart.xy, fragend.xy, search1);
+			uv.xy = frag / texsize;
 
-			ViewDistance = (ViewStart.z * ViewEnd.z) / lerp(ViewEnd.z, ViewStart.z, search1);
-			depth = ViewDistance - PositionTo.z;
+			if (any(uv.xy < float2(0, 0)) || any(uv.xy > float2(1, 1))) break;
+
+			positionto = GetFullViewPosition(uv.xy);
+
+			viewdistance = (viewstart.z * viewend.z) / lerp(viewend.z, viewstart.z, search1);
+			depth = viewdistance - positionto.z;
 
 			if (depth > 0 && depth < thickness)
 			{
@@ -162,7 +172,20 @@ float4 main(VertexOut pin) : SV_Target
 			}
 		}
 
-		return float4(uv.xy, 1, 1);
+		//return float4(uv.xy, hit1, 1);
+
+		float visibility = hit1 *
+			(1 - max(dot(-positionfromunit, pivot), 0)) *
+			(1 - clamp(depth / thickness, 0, 1)) *
+			(1 - clamp(length(positionto - positionfrom) / maxdistance, 0, 1)) *
+			(uv.x < 0 || uv.x > 1 ? 0 : 1) *
+			(uv.y < 0 || uv.y > 1 ? 0 : 1);
+
+		visibility = saturate(visibility);
+
+
+		return float4(uv.xy, 0, visibility);
+
 	}
 
 	return float4(p, 1);
@@ -174,6 +197,12 @@ struct RayPayload
 	float2 TexCoord;
 };
 
+// TODO
+// ray marching
+// binary search
+// blur
+
+//
 //float4 main(VertexOut pin) : SV_Target
 //{
 //	// view space normal and depth (z-coord) of this pixel
@@ -187,6 +216,10 @@ struct RayPayload
 //
 //	float3 dir = normalize(p);
 //	float3 ReflectDir = normalize(reflect(dir, normalize(n)));
+//
+//	float angle = clamp(dot(ReflectDir, normalize(n)), 0, 1);
+//
+//
 //
 //
 //
@@ -202,7 +235,7 @@ struct RayPayload
 //	payload.hit = false;
 //	payload.TexCoord = float2(0, 0);
 //
-//	for (int i = 0; i < 512; ++i)
+//	for (int i = 0; i < 1000; ++i)
 //	{
 //		//if (!payload.hit)
 //		{
@@ -212,6 +245,8 @@ struct RayPayload
 //			temp = mul(gProj, temp);
 //			temp.xy /= temp.w;
 //			CurrTexCoord = float3(temp.xy * float2(+0.5f, -0.5f) + 0.5f, temp.z);
+//
+//			if (any(CurrTexCoord.xy <= float2(0, 0)) || any(CurrTexCoord.xy >= float2(1, 1))) break;
 //
 //			//CurrTexCoord = temp.z / temp.w;
 //			//return float4(CurrTexCoord, 1);
@@ -233,5 +268,10 @@ struct RayPayload
 //		}
 //	}
 //
-//	return float4(payload.TexCoord, payload.hit ? 1 : 0, 1);
+//	//return float4(angle, angle, payload.hit ? 1 : 0, 1);
+//	//return float4(payload.TexCoord, payload.hit ? 1 : 0, 1);
+//
+//	bool visibility = payload.hit && angle < 1;
+//
+//	return float4(payload.TexCoord, visibility ? 1 : 0, 1);
 //}
