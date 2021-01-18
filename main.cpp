@@ -35,8 +35,8 @@ public:
 	SSR();
 	~SSR();
 
-	void Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ);
-	void OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ);
+	void Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ);
+	void OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ);
 
 	void ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV);
 };
@@ -62,9 +62,9 @@ SSR::~SSR()
 	SafeRelease(mConstantBuffer);
 }
 
-void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ)
+void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ)
 {
-	OnResize(device, width, height, FieldOfViewY, FarZ);
+	OnResize(device, width, height, FieldOfViewY, NearZ, FarZ);
 
 	GeometryGenerator::CreateScreenQuad(mReflectionsMapQuad.mMesh);
 
@@ -192,7 +192,7 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 	}
 }
 
-void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float FarZ)
+void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ)
 {
 	mWidth = width;
 	mHeight = height;
@@ -212,10 +212,10 @@ void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfV
 		float HalfHeight = FarZ * tanf(0.5f * FieldOfViewY);
 		float HalfWidth = aspect * HalfHeight;
 
-		mFrustumFarCorner[0] = XMFLOAT4(-HalfWidth, -HalfHeight, FarZ, 0.0f);
-		mFrustumFarCorner[1] = XMFLOAT4(-HalfWidth, +HalfHeight, FarZ, 0.0f);
-		mFrustumFarCorner[2] = XMFLOAT4(+HalfWidth, +HalfHeight, FarZ, 0.0f);
-		mFrustumFarCorner[3] = XMFLOAT4(+HalfWidth, -HalfHeight, FarZ, 0.0f);
+		mFrustumFarCorner[0] = XMFLOAT4(-HalfWidth, -HalfHeight, NearZ, FarZ);
+		mFrustumFarCorner[1] = XMFLOAT4(-HalfWidth, +HalfHeight, NearZ, FarZ);
+		mFrustumFarCorner[2] = XMFLOAT4(+HalfWidth, +HalfHeight, NearZ, FarZ);
+		mFrustumFarCorner[3] = XMFLOAT4(+HalfWidth, -HalfHeight, NearZ, FarZ);
 	}
 
 	// reflections map RTV and SRV
@@ -1075,7 +1075,7 @@ bool TestApp::Init()
 	mSSAO.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
 	mSSAO.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::BottomRight, AspectRatio());
 
-	mSSR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
+	mSSR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
 	mSSR.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
 
 	//// scene bounds
@@ -1158,6 +1158,8 @@ void TestApp::OnResize(GLFWwindow* window, int width, int height)
 
 	mSSAO.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
 	mSSAO.mDebugQuad.OnResize(AspectRatio());
+
+	mSSR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
 
 	// scene albedo RTV and SRV
 	{
