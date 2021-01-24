@@ -18,14 +18,12 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\3D-Game-Programming-with-DirectX11\D3DApp\D3DApp.cpp">
+    <ClCompile Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="..\3D-Game-Programming-with-DirectX11\D3DApp\D3DApp.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
+    <ClCompile Include="SSR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="DebugQuadPS.hlsl">
@@ -91,5 +89,13 @@
     <FxCompile Include="SSRReflectionsMapComputePS.hlsl">
       <Filter>Source Files</Filter>
     </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SSR.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
