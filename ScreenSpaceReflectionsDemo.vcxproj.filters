@@ -24,6 +24,9 @@
     <ClCompile Include="SSR.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="SSPR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="DebugQuadPS.hlsl">
@@ -89,12 +92,24 @@
     <FxCompile Include="SSRReflectionsMapComputePS.hlsl">
       <Filter>Source Files</Filter>
     </FxCompile>
+    <FxCompile Include="SSPRReflectionsMapComputeCS.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
+    <FxCompile Include="SSPRReflectionsMapComputePS.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
+    <FxCompile Include="SSPRReflectionsMapComputeVS.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SSR.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SSPR.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

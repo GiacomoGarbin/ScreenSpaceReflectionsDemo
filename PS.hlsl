@@ -81,7 +81,11 @@ TextureCube gCubeMap : register(t2);
 Texture2D gShadowTexture : register(t3);
 Texture2D gAmbientTexture : register(t4);
 #if ENABLE_SSR
+#if ENABLE_SSPR
+Texture2D<uint> gReflectionsTexture : register(t5);
+#else // ENABLE_SSPR
 Texture2D gReflectionsTexture : register(t5);
+#endif // ENABLE_SSPR
 Texture2D gSceneAlbedoTexture : register(t6);
 #endif // ENABLE_SSR
 
@@ -348,6 +352,9 @@ float4 main(VertexOut pin) : SV_TARGET
 
 #if ENABLE_SSR
 		{
+#if ENABLE_SSPR
+			{}
+#else // ENABLE_SSPR
 			//float2 scale = float2(1 / gTexCoordTransform._11, 1 / gTexCoordTransform._22);
 			//float2 TexCoord = scale * pin.TexCoord;
 
@@ -364,39 +371,40 @@ float4 main(VertexOut pin) : SV_TARGET
 			color += gMaterial.reflect * float4(lerp(float3(0,0,0), ReflectCol.rgb, RayPayload.w), 1);
 			//color = ReflectCol;
 
-			// https://github.com/lettier/3d-game-shaders-for-beginners/blob/master/demonstration/shaders/fragment/reflection-color.frag
-			{
-				float size = 6;
-				float separation = 2;
+			//// https://github.com/lettier/3d-game-shaders-for-beginners/blob/master/demonstration/shaders/fragment/reflection-color.frag
+			//{
+			//	float size = 6;
+			//	float separation = 2;
 
-				float4 uv = gReflectionsTexture.Sample(gLinearSamplerState, TexCoord);
+			//	float4 uv = gReflectionsTexture.Sample(gLinearSamplerState, TexCoord);
 
-				// removes holes in the UV map
-				if (uv.a <= 0)
-				{
-					uv = 0;
-					float count = 0;
+			//	// removes holes in the UV map
+			//	if (uv.a <= 0)
+			//	{
+			//		uv = 0;
+			//		float count = 0;
 
-					for (float i = -size; i <= size; ++i)
-					{
-						for (float j = -size; j <= size; ++j)
-						{
-							float2 TexCoord = ((float2(i, j) * separation) + pin.PositionH.xy) / TexSize;
-							uv += gReflectionsTexture.Sample(gLinearSamplerState, TexCoord);
-							
-							count += 1;
-						}
-					}
+			//		for (float i = -size; i <= size; ++i)
+			//		{
+			//			for (float j = -size; j <= size; ++j)
+			//			{
+			//				float2 TexCoord = ((float2(i, j) * separation) + pin.PositionH.xy) / TexSize;
+			//				uv += gReflectionsTexture.Sample(gLinearSamplerState, TexCoord);
+			//				
+			//				count += 1;
+			//			}
+			//		}
 
-					uv /= count;
-				}
+			//		uv /= count;
+			//	}
 
-				uv.a = clamp(uv.a, 0, 1);
+			//	uv.a = clamp(uv.a, 0, 1);
 
-				float4 ReflectCol = gSceneAlbedoTexture.Sample(gLinearSamplerState, uv.xy);
+			//	float4 ReflectCol = gSceneAlbedoTexture.Sample(gLinearSamplerState, uv.xy);
 
-				//color += gMaterial.reflect * float4(lerp(float3(0, 0, 0), ReflectCol.rgb, uv.a), 1);
-			}
+			//	//color += gMaterial.reflect * float4(lerp(float3(0, 0, 0), ReflectCol.rgb, uv.a), 1);
+			//}
+#endif // ENABLE_SSPR
 		}
 #endif // ENABLE_SSR
 	}

@@ -2,6 +2,10 @@ cbuffer ConstantBuffer : register(b0)
 {
 	float4   gFrustumFarCorner[4]; // just need 3 floats : half width, half height and far z (maybe near z too)
 	float4x4 gProj;
+
+	float4x4 gView;
+	float4x4 gViewInverse;
+	float4x4 gReflect;
 };
 
 struct VertexOut
@@ -490,64 +494,88 @@ bool TraceScreenSpaceRay(
 	return IntersectsDepthBuffer(sceneZMax, rayZMin, rayZMax);
 }
 
+//float4 main(VertexOut pin) : SV_Target
+//{
+//	// view space normal and depth (z-coord) of this pixel
+//	float4 NormalDepth = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, pin.TexCoord, 0);
+//	float3 normal = normalize(NormalDepth.xyz);
+//	float  depth  = NormalDepth.w;
+//
+//	float3 RayOrigin = GetFullViewPosition(pin.TexCoord, depth);
+//	//float3 RayDir = normalize(reflect(normalize(RayOrigin), normal));
+//	float3 RayDir = -2.0f * dot(normalize(RayOrigin), normal) * normal + normalize(RayOrigin);
+//
+//	float2 TexSize;
+//	gNormalDepthMap.GetDimensions(TexSize.x, TexSize.y);
+//
+//	float2 HitPixel;
+//	float3 HitPoint;
+//
+//	bool t = TraceScreenSpaceRay(
+//		RayOrigin, // camera-space ray origin
+//		RayDir, // camera-space ray direction
+//		gProj, // projection matrix
+//		gNormalDepthMap, // camera-space Z buffer
+//		TexSize, // dimensions of Z buffer
+//		0, // camera space thickness
+//		gFrustumFarCorner[0].z, // near plane Z
+//		1, // stride, step in horizontal or vertical pixels between samples
+//		0, // jitter
+//		10, // max steps
+//		1000, // max camera-space distance
+//		HitPixel, // hit pixel coordinates
+//		HitPoint); // hit camera space location
+//
+//	float2 temp = saturate(HitPixel);
+//
+//	if (any(temp != HitPixel))
+//	{
+//		//t = 0;
+//	}
+//
+//	//return t;
+//	return float4(HitPixel, 0, t);
+//}
+
+
+// 4th ATTEMPT
+// GPU Pro5: Advanced Rendering Techniques -> Hi-Z Screen-Space Cone-Traced Reflections (Yasin Uludag)
+// http://bitsquid.blogspot.com/2017/08/notes-on-screen-space-hiz-tracing.html
+
+
+// 5th ATTEMPT
+
 float4 main(VertexOut pin) : SV_Target
 {
+	float DepthScale = 0.05f;
+
 	// view space normal and depth (z-coord) of this pixel
 	float4 NormalDepth = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, pin.TexCoord, 0);
 	float3 normal = normalize(NormalDepth.xyz);
 	float  depth  = NormalDepth.w;
+	//return float4(NormalDepth.www * DepthScale, 0);
 
-	float3 RayOrigin = GetFullViewPosition(pin.TexCoord, depth);
-	//float3 RayDir = normalize(reflect(normalize(RayOrigin), normal));
-	float3 RayDir = -2.0f * dot(normalize(RayOrigin), normal) * normal + normalize(RayOrigin);
+	float3 PosVS = GetFullViewPosition(pin.TexCoord, depth);
+	//return float4(PosVS, 0);
+	//return float4(PosVS.zzz * DepthScale, 0);
 
-	float2 TexSize;
-	gNormalDepthMap.GetDimensions(TexSize.x, TexSize.y);
+	float3 PosWS = mul(gViewInverse, float4(PosVS, 1)).xyz;
+	//return float4(PosWS, 0);
 
-	float2 HitPixel;
-	float3 HitPoint;
+	float3 HitPointWS = mul(gReflect, float4(PosWS, 1)).xyz;
+	//return float4(HitPointWS, 0);
 
-	bool t = TraceScreenSpaceRay(
-		RayOrigin, // camera-space ray origin
-		RayDir, // camera-space ray direction
-		gProj, // projection matrix
-		gNormalDepthMap, // camera-space Z buffer
-		TexSize, // dimensions of Z buffer
-		0, // camera space thickness
-		gFrustumFarCorner[0].z, // near plane Z
-		1, // stride, step in horizontal or vertical pixels between samples
-		0, // jitter
-		10, // max steps
-		1000, // max camera-space distance
-		HitPixel, // hit pixel coordinates
-		HitPoint); // hit camera space location
+	float3 HitPointVS = mul(gView, float4(HitPointWS, 1)).xyz;
+	//return float4(HitPointVS, 0);
+	//return float4(HitPointVS.zzz * DepthScale, 0);
 
-	float2 temp = saturate(HitPixel);
+	float4 HitPixel = mul(gProj, float4(HitPointVS, 1));
+	HitPixel.xy /= HitPixel.w;
+	HitPixel.xy = HitPixel.xy * float2(+0.5f, -0.5f) + 0.5f;
 
-	if (any(temp != HitPixel))
-	{
-		//t = 0;
-	}
+	//HitPixel.y = 1 - HitPixel.y;
 
-	//return t;
-	return float4(HitPixel, 0, t);
-}
+	float visibility = (any(HitPixel.xy < float2(0, 0)) || any(HitPixel.xy > float2(1, 1))) ? 0 : 1;
 
-
-
-// 4th ATTEMPT
-
-static float gThickness = 1;
-static float gStride = 1;
-static float gJitter = 0;
-static float gMaxDistance = 1000;
-static float gMaxSteps = 100;
-
-bool RayTrace(
-	float3 RayOrigin,
-	float3 RayDir,
-	out float2 HitTexCoord
-)
-{
-	return false;
+	return float4(HitPixel.xy, 0, visibility);
 }

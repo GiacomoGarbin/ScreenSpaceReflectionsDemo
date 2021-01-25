@@ -1,6 +1,8 @@
 cbuffer DebugQuadCB : register(b0)
 {
     float4x4 gWorldViewProj;
+    float2 gDebugQuadSize;
+    float2 padding;
 };
 
 struct VertexIn

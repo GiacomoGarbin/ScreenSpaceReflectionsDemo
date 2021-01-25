@@ -5,6 +5,7 @@
 #include <sstream>
 
 #include "SSR.h"
+#include "SSPR.h"
 
 class TestApp : public D3DApp
 {
@@ -104,6 +105,7 @@ public:
 	void DrawSceneToSSAONormalDepthMap();
 
 	SSR mSSR;
+	SSPR mSSPR;
 
 	//void DrawSceneToReflectionsMap();
 
@@ -751,14 +753,29 @@ bool TestApp::Init()
 	}
 
 	mShadowMap.Init(mDevice, 2048, 2048);
-	mShadowMap.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::BottomLeft, 1);
+	mShadowMap.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::BottomLeft, 1);
 	mContext->PSSetSamplers(1, 1, &mShadowMap.GetSS());
 
 	mSSAO.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
-	mSSAO.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::BottomRight, AspectRatio());
+	mSSAO.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::BottomRight, AspectRatio());
 
 	mSSR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
-	mSSR.mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
+	mSSR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
+
+	mSSPR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
+	mSSPR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
+
+	{
+		std::wstring path = L"DebugQuadPS.hlsl";
+
+		std::vector<D3D_SHADER_MACRO> defines;
+		defines.push_back({ "ENABLE_SSPR", "1" });
+		defines.push_back({ nullptr, nullptr });
+
+		ID3DBlob* pCode;
+		HR(D3DCompileFromFile(path.c_str(), defines.data(), nullptr, "main", "ps_5_0", 0, 0, &pCode, nullptr));
+		HR(mDevice->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mSSPR.mDebugQuad.mPixelShader));
+	}
 
 	//// scene bounds
 	//if (!mObjectInstances.empty())
@@ -813,7 +830,7 @@ bool TestApp::Init()
 			SafeRelease(texture);
 		}
 
-		mDebugQuad.Init(mDevice, AspectRatio(), DebugQuad::WindowCorner::FullWindow, AspectRatio());
+		mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::FullWindow, AspectRatio());
 
 		// pixel shader
 		{
@@ -836,12 +853,14 @@ void TestApp::OnResize(GLFWwindow* window, int width, int height)
 {
 	D3DApp::OnResize(window, width, height);
 
-	mShadowMap.mDebugQuad.OnResize(AspectRatio());
+	mShadowMap.mDebugQuad.OnResize(mMainWindowWidth, mMainWindowHeight, AspectRatio());
 
 	mSSAO.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mFarZ);
-	mSSAO.mDebugQuad.OnResize(AspectRatio());
+	mSSAO.mDebugQuad.OnResize(mMainWindowWidth, mMainWindowHeight, AspectRatio());
 
 	mSSR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
+
+	mSSPR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
 
 	// scene albedo RTV and SRV
 	{
@@ -870,7 +889,7 @@ void TestApp::OnResize(GLFWwindow* window, int width, int height)
 		SafeRelease(texture);
 	}
 
-	mDebugQuad.OnResize(AspectRatio());
+	mDebugQuad.OnResize(mMainWindowWidth, mMainWindowHeight, AspectRatio());
 }
 
 void TestApp::UpdateScene(float dt)
@@ -922,8 +941,8 @@ void TestApp::UpdateScene(float dt)
 	//}
 
 	// update characters animation
-	mCharacterInstance1.update(dt);
-	mCharacterInstance2.update(dt);
+	//mCharacterInstance1.update(dt);
+	//mCharacterInstance2.update(dt);
 
 	// build shadow transform
 	mShadowMap.BuildTranform(mLights[0].mDirection, mSceneBounds);
@@ -1327,7 +1346,8 @@ void TestApp::DrawScene()
 
 	// SSR
 	{
-		mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
+		//mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
+		mSSPR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
 	}
 
 	// restore back and depth buffers, and viewport
@@ -1375,9 +1395,9 @@ void TestApp::DrawScene()
 		// transform NDC space [-1,+1]^2 to texture space [0,1]^2
 		XMMATRIX T
 		(
-			+0.5f, 0.0f, 0.0f, 0.0f,
-			0.0f, -0.5f, 0.0f, 0.0f,
-			0.0f, 0.0f, 1.0f, 0.0f,
+			+0.5f,  0.0f, 0.0f, 0.0f,
+			 0.0f, -0.5f, 0.0f, 0.0f,
+			 0.0f,  0.0f, 1.0f, 0.0f,
 			+0.5f, +0.5f, 0.0f, 1.0f
 		);
 
@@ -1396,7 +1416,7 @@ void TestApp::DrawScene()
 		mContext->PSSetConstantBuffers(0, 1, &mPerObjectCB);
 	};
 
-	auto DrawGameObject = [this, &SetPerObjectCB](GameObject* obj) -> void
+	auto DrawGameObject = [this, &SetPerObjectCB](GameObject* obj, bool flag = false) -> void
 	{
 		FLOAT BlendFactor[] = { 0, 0, 0, 0 };
 
@@ -1456,7 +1476,7 @@ void TestApp::DrawScene()
 
 		mContext->OMSetBlendState(obj->mBlendState.Get(), BlendFactor, 0xFFFFFFFF);
 
-		if (obj->mDepthStencilState.Get() != nullptr || IsKeyPressed(GLFW_KEY_1))
+		if (obj->mDepthStencilState.Get() != nullptr || IsKeyPressed(GLFW_KEY_1) || flag)
 		{
 			mContext->OMSetDepthStencilState(obj->mDepthStencilState.Get(), obj->mStencilRef);
 		}
@@ -1495,7 +1515,7 @@ void TestApp::DrawScene()
 
 		// draw without reflection
 		{
-			DrawGameObject(&mGrid);
+			DrawGameObject(&mGrid, false);
 			DrawGameObject(&mBox);
 
 			for (UINT i = 0; i < 5; ++i)
@@ -1646,6 +1666,7 @@ void TestApp::DrawScene()
 		DrawGameObject(&mSky);
 	};
 
+	//mGrid.mPixelShader = nullptr;
 	DrawSceneTo(mSceneAlbedoRTV);
 
 	mContext->OMSetRenderTargets(0, nullptr, nullptr);
@@ -1661,11 +1682,13 @@ void TestApp::DrawScene()
 	//}
 
 	{
-		mGrid.mPixelShader = mSSR.mPixelShader;
+		//mGrid.mPixelShader = mSSR.mPixelShader;
+		mGrid.mPixelShader = mSSPR.mPixelShader;
 
 		// bind reflections map and scene albedo map SRVs
 		ID3D11ShaderResourceView* const SRVs[2] = {
-			mSSR.mReflectionsMapSRV,
+			//mSSR.mReflectionsMapSRV,
+			mSSPR.mReflectionsMapSRV,
 			mSceneAlbedoSRV
 		};
 		mContext->PSSetShaderResources(5, 2, SRVs);
@@ -1711,7 +1734,8 @@ void TestApp::DrawScene()
 
 	if (IsKeyPressed(GLFW_KEY_5))
 	{
-		mSSR.mDebugQuad.Draw(mContext, mSSR.mReflectionsMapSRV);
+		//mSSR.mDebugQuad.Draw(mContext, mSSR.mReflectionsMapSRV);
+		mSSPR.mDebugQuad.Draw(mContext, mSSPR.mReflectionsMapSRV);
 	}
 
 	mSwapChain->Present(0, 0);

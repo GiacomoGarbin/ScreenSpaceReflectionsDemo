@@ -1,27 +1,25 @@
-#include "SSR.h"
+#include "SSPR.h"
 
-SSR::SSR() :
-	mReflectionsMapRTV(nullptr),
+SSPR::SSPR() :
+	mReflectionsMapUAV(nullptr),
 	mReflectionsMapSRV(nullptr),
-	//mVertexShader(nullptr),
-	//mInputLayout(nullptr),
+	//mComputeShader(nullptr),
 	mPixelShader(nullptr),
-	mSamplerState(nullptr),
-	mConstantBuffer(nullptr)
+	mConstantBuffer(nullptr),
+	mSamplerState(nullptr)
 {}
 
-SSR::~SSR()
+SSPR::~SSPR()
 {
-	SafeRelease(mReflectionsMapRTV);
+	SafeRelease(mReflectionsMapUAV);
 	SafeRelease(mReflectionsMapSRV);
-	//SafeRelease(mVertexShader);
-	//SafeRelease(mInputLayout);
+	//SafeRelease(mComputeShader);
 	SafeRelease(mPixelShader);
-	SafeRelease(mSamplerState);
 	SafeRelease(mConstantBuffer);
+	SafeRelease(mSamplerState);
 }
 
-void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ)
+void SSPR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ)
 {
 	OnResize(device, width, height, FieldOfViewY, NearZ, FarZ);
 
@@ -69,9 +67,18 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 		HR(device->CreateBuffer(&desc, &InitData, &mReflectionsMapQuad.mIndexBuffer));
 	}
 
-	// VS
+	//// compute shader
+	//{
+	//	std::wstring path = L"SSPRReflectionsMapComputeCS.hlsl";
+
+	//	ID3DBlob* pCode;
+	//	HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "cs_5_0", 0, 0, &pCode, nullptr));
+	//	HR(device->CreateComputeShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mComputeShader));
+	//}
+
+	// reflections map vertex shader
 	{
-		std::wstring path = L"SSRReflectionsMapComputeVS.hlsl";
+		std::wstring path = L"SSPRReflectionsMapComputeVS.hlsl";
 
 		ID3DBlob* pCode;
 		HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "vs_5_0", 0, 0, &pCode, nullptr));
@@ -90,16 +97,16 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 		}
 	}
 
-	// PS
+	// reflections map pixel shader
 	{
-		std::wstring path = L"SSRReflectionsMapComputePS.hlsl";
+		std::wstring path = L"SSPRReflectionsMapComputePS.hlsl";
 
 		ID3DBlob* pCode;
 		HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "ps_5_0", 0, 0, &pCode, nullptr));
 		HR(device->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mReflectionsMapQuad.mPixelShader));
 	}
 
-	// PS
+	// reflective surface pixel shader
 	{
 		std::wstring path = L"PS.hlsl";
 
@@ -111,12 +118,26 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 		//defines.push_back({ "ENABLE_LIGHTING",       "1" });
 		defines.push_back({ "ENABLE_REFLECTION",      "0" });
 		defines.push_back({ "ENABLE_SSR",             "1" });
+		defines.push_back({ "ENABLE_SSPR",            "1" });
 		defines.push_back({ "ENABLE_FOG",             "0" });
 		defines.push_back({ nullptr, nullptr });
 
 		ID3DBlob* pCode;
 		HR(D3DCompileFromFile(path.c_str(), defines.data(), nullptr, "main", "ps_5_0", 0, 0, &pCode, nullptr));
 		HR(device->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mPixelShader));
+	}
+
+	// constant buffer
+	{
+		D3D11_BUFFER_DESC desc;
+		desc.ByteWidth = sizeof(ConstantBuffer);
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+		desc.StructureByteStride = 0;
+
+		HR(device->CreateBuffer(&desc, nullptr, &mConstantBuffer));
 	}
 
 	// sampler state
@@ -136,22 +157,9 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 
 		HR(device->CreateSamplerState(&desc, &mSamplerState));
 	}
-
-	// constant buffer
-	{
-		D3D11_BUFFER_DESC desc;
-		desc.ByteWidth = sizeof(ConstantBuffer);
-		desc.Usage = D3D11_USAGE_DEFAULT;
-		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-		desc.CPUAccessFlags = 0;
-		desc.MiscFlags = 0;
-		desc.StructureByteStride = 0;
-
-		HR(device->CreateBuffer(&desc, nullptr, &mConstantBuffer));
-	}
 }
 
-void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ)
+void SSPR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ)
 {
 	mWidth = width;
 	mHeight = height;
@@ -177,29 +185,28 @@ void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfV
 		mFrustumFarCorner[3] = XMFLOAT4(+HalfWidth, -HalfHeight, NearZ, FarZ);
 	}
 
-	// reflections map RTV and SRV
+	// reflections map UAV and SRV
 	{
-		// render to ambient map at half the resolution
 		D3D11_TEXTURE2D_DESC desc;
 		desc.Width = mWidth; // / 2;
 		desc.Height = mHeight; // / 2;
 		desc.MipLevels = 1;
 		desc.ArraySize = 1;
-		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.Format = DXGI_FORMAT_R32_UINT;
 		desc.SampleDesc.Count = 1;
 		desc.SampleDesc.Quality = 0;
 		desc.Usage = D3D11_USAGE_DEFAULT;
-		desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS| D3D11_BIND_SHADER_RESOURCE;
 		desc.CPUAccessFlags = 0;
 		desc.MiscFlags = 0;
 
-		SafeRelease(mReflectionsMapRTV);
+		SafeRelease(mReflectionsMapUAV);
 		SafeRelease(mReflectionsMapSRV);
 
 		ID3D11Texture2D* texture = nullptr;
 		HR(device->CreateTexture2D(&desc, nullptr, &texture));
 
-		HR(device->CreateRenderTargetView(texture, nullptr, &mReflectionsMapRTV));
+		HR(device->CreateUnorderedAccessView(texture, nullptr, &mReflectionsMapUAV));
 		HR(device->CreateShaderResourceView(texture, nullptr, &mReflectionsMapSRV));
 
 		SafeRelease(texture);
@@ -208,12 +215,53 @@ void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfV
 	mDebugQuad.OnResize(mWidth, mHeight, (float)mWidth / (float)mHeight);
 }
 
-void SSR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV)
+//void SSPR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV)
+//{
+//	// bind compute shader
+//	context->CSSetShader(mComputeShader, nullptr, 0);
+//
+//	// update and bind constant buffer
+//	{
+//		ConstantBuffer buffer;
+//
+//		for (UINT i = 0; i < 4; ++i) buffer.FrustumFarCorner[i] = mFrustumFarCorner[i];
+//		XMStoreFloat4x4(&buffer.proj, camera.mProj);
+//
+//		buffer.view = camera.mView;
+//
+//		XMMATRIX view = XMLoadFloat4x4(&camera.mView);
+//		XMVECTOR det = XMMatrixDeterminant(view);
+//		XMStoreFloat4x4(&buffer.ViewInverse, XMMatrixInverse(&det, view));
+//
+//		XMFLOAT4 plane = XMFLOAT4(0, 1, 0, 0);
+//		XMStoreFloat4x4(&buffer.reflect, XMMatrixReflect(XMLoadFloat4(&plane)));
+//
+//		context->UpdateSubresource(mConstantBuffer, 0, 0, &buffer, 0, 0);
+//
+//		context->CSSetConstantBuffers(0, 1, &mConstantBuffer);
+//	}
+//
+//	// bind reflections map UAV
+//	context->CSSetUnorderedAccessViews(0, 1, &mReflectionsMapUAV, nullptr);
+//
+//	UINT GroupsX = std::ceil(mWidth / 256.0f);
+//	context->Dispatch(GroupsX, mHeight, 1);
+//
+//	// unbind UAV
+//	{
+//		ID3D11UnorderedAccessView* const NullUAV[1] = { nullptr };
+//		context->CSSetUnorderedAccessViews(0, 1, NullUAV, nullptr);
+//	}
+//}
+
+void SSPR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV)
 {
-	// bind the reflections map as the render target
-	// do not bind a depth/stencil buffer -> no depth test is performed
-	context->OMSetRenderTargets(1, &mReflectionsMapRTV, nullptr);
-	context->ClearRenderTargetView(mReflectionsMapRTV, Colors::Black);
+	// bind reflections map UAV
+	context->OMSetRenderTargetsAndUnorderedAccessViews(0, nullptr, nullptr, 1, 1, &mReflectionsMapUAV, nullptr);
+
+	const UINT values[] = { 0, 0, 0, 0 };
+	context->ClearUnorderedAccessViewUint(mReflectionsMapUAV, values);
+	
 	context->RSSetViewports(1, &mReflectionsMapViewport);
 
 	// shaders
@@ -234,7 +282,7 @@ void SSR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject
 		context->IASetIndexBuffer(mReflectionsMapQuad.mIndexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
 	}
 
-	// update and bind CBs
+	// update and bind constant buffer
 	{
 		ConstantBuffer buffer;
 
@@ -256,12 +304,22 @@ void SSR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject
 		context->PSSetConstantBuffers(0, 1, &mConstantBuffer);
 	}
 
-	// bind SRVs
+	// bind normal-depth SRV
 	{
 		context->PSSetShaderResources(0, 1, &NormalDepthSRV);
 	}
 
-	// bind SSs
+//
+//	UINT GroupsX = std::ceil(mWidth / 256.0f);
+//	context->Dispatch(GroupsX, mHeight, 1);
+//
+//	// unbind UAV
+//	{
+//		ID3D11UnorderedAccessView* const NullUAV[1] = { nullptr };
+//		context->CSSetUnorderedAccessViews(0, 1, NullUAV, nullptr);
+//	}
+
+	// bind sampler state
 	{
 		context->PSSetSamplers(2, 1, &mSamplerState);
 	}
@@ -290,6 +348,6 @@ void SSR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject
 		context->PSSetSamplers(2, 1, NullSSs);
 	}
 
-	// unbind render target
-	context->OMSetRenderTargets(0, nullptr, nullptr);
+	// unbind reflections map UAV
+	context->OMSetRenderTargetsAndUnorderedAccessViews(0, nullptr, nullptr, 0, 0, nullptr, nullptr);
 }
