@@ -353,7 +353,18 @@ float4 main(VertexOut pin) : SV_TARGET
 #if ENABLE_SSR
 		{
 #if ENABLE_SSPR
-			{}
+			{
+				uint value = gReflectionsTexture.Load(int3(pin.PositionH.xy, 0));
+
+				uint x = value & 0xFFFF;
+				uint y = value >> 16;
+
+				if (value != 0)
+				{
+					float4 ReflectCol = gSceneAlbedoTexture.Load(int3(x, y, 0));
+					color += gMaterial.reflect * float4(lerp(float3(0, 0, 0), ReflectCol.rgb, 1), 1);
+				}
+			}
 #else // ENABLE_SSPR
 			//float2 scale = float2(1 / gTexCoordTransform._11, 1 / gTexCoordTransform._22);
 			//float2 TexCoord = scale * pin.TexCoord;

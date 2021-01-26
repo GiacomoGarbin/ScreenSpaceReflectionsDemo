@@ -90,7 +90,10 @@ float4 main(VertexOut pin) : SV_Target
 	//ProjectionHashUAV[ReflPosPixel] = SrcPosPixel.y << 16 | SrcPosPixel.x;
 
 	//gReflectionsMap[pin.PositionH.xy] = 255;
-	gReflectionsMap[ReflPixel.xy] = uint(pin.PositionH.y) << 16 | uint(pin.PositionH.x);
+	//gReflectionsMap[ReflPixel.xy] = uint(pin.PositionH.y) << 16 | uint(pin.PositionH.x);
+
+	uint temp;
+	InterlockedMax(gReflectionsMap[ReflPixel.xy], uint(pin.PositionH.y) << 16 | uint(pin.PositionH.x), temp);
 
 	return 0;
 }

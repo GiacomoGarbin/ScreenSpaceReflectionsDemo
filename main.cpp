@@ -1211,7 +1211,7 @@ void TestApp::DrawSceneToSSAONormalDepthMap()
 		mContext->PSSetShaderResources(0, 1, NullSRV);
 	};
 
-	DrawGameObject(&mGrid);
+	//DrawGameObject(&mGrid);
 	DrawGameObject(&mBox);
 	DrawGameObject(&mSkull);
 
@@ -1476,9 +1476,13 @@ void TestApp::DrawScene()
 
 		mContext->OMSetBlendState(obj->mBlendState.Get(), BlendFactor, 0xFFFFFFFF);
 
-		if (obj->mDepthStencilState.Get() != nullptr || IsKeyPressed(GLFW_KEY_1) || flag)
+		if (obj->mDepthStencilState.Get() != nullptr)
 		{
 			mContext->OMSetDepthStencilState(obj->mDepthStencilState.Get(), obj->mStencilRef);
+		}
+		else if (IsKeyPressed(GLFW_KEY_1) || flag)
+		{
+			mContext->OMSetDepthStencilState(nullptr, 0);
 		}
 		else
 		{
@@ -1515,7 +1519,7 @@ void TestApp::DrawScene()
 
 		// draw without reflection
 		{
-			DrawGameObject(&mGrid, false);
+			if (rtv == mRenderTargetView) DrawGameObject(&mGrid, true);
 			DrawGameObject(&mBox);
 
 			for (UINT i = 0; i < 5; ++i)

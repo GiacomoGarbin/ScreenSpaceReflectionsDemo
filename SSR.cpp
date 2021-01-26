@@ -111,6 +111,7 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 		//defines.push_back({ "ENABLE_LIGHTING",       "1" });
 		defines.push_back({ "ENABLE_REFLECTION",      "0" });
 		defines.push_back({ "ENABLE_SSR",             "1" });
+		defines.push_back({ "ENABLE_SSPR",            "0" });
 		defines.push_back({ "ENABLE_FOG",             "0" });
 		defines.push_back({ nullptr, nullptr });
 

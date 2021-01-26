@@ -36,8 +36,6 @@ float4 main(VertexOut pin) : SV_Target
     if (value != 0)
     {
         albedo = float3(float2(x, y) / float2(800, 600), 0);
-
-
     }
 
     //float2 size = float2(800, 600);
