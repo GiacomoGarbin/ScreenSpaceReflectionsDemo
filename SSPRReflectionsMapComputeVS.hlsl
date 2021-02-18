@@ -2,6 +2,17 @@ cbuffer ConstantBuffer : register(b0)
 {
 	float4   gFrustumFarCorner[4];
 	float4x4 gProj;
+
+	float4x4 gView;
+	float4x4 gViewInverse;
+	float4x4 gReflect;
+
+	float4x4 gViewProj;
+	float4x4 gViewProjInverse;
+
+	float3 gCameraPosition;
+
+	float padding;
 };
 
 struct VertexIn

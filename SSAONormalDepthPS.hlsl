@@ -21,5 +21,5 @@ float4 main(VertexOut pin) : SV_TARGET
 #endif // ENABLE_ALPHA_CLIPPING
 #endif // ENABLE_TEXTURE
 
-	return float4(pin.NormalV, pin.PositionV.z);
+	return float4(pin.NormalV, pin.PositionH.z);
 }

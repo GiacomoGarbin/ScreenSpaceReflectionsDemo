@@ -25,6 +25,13 @@ public:
 		XMFLOAT4X4 view;
 		XMFLOAT4X4 ViewInverse;
 		XMFLOAT4X4 reflect;
+
+		XMFLOAT4X4 ViewProj;
+		XMFLOAT4X4 ViewProjInverse;
+
+		XMFLOAT3 CameraPosition;
+		
+		float padding;
 	};
 
 	static_assert((sizeof(ConstantBuffer) % 16) == 0, "constant buffer size must be 16-byte aligned");
@@ -42,6 +49,33 @@ public:
 	void OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY, float NearZ, float FarZ);
 
 	void ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV);
+
+	// hierarchical depth buffer
+
+	ID3D11ComputeShader* mCopyDepthBufferCS;
+	//ID3D11UnorderedAccessView* mCopyDepthBufferUAV;
+	//ID3D11ShaderResourceView* mCopyDepthBufferSRV;
+
+	//ID3D11ComputeShader* mHierarchicalDepthBufferCS;
+
+	//ID3D11VertexShader* mHierarchicalDepthBufferVS;
+	//ID3D11InputLayout* mHierarchicalDepthBufferIL;
+	//ID3D11PixelShader* mHierarchicalDepthBufferPS;
+
+	DebugQuad mHierarchicalDepthBufferQuad;
+
+	//ID3D11RenderTargetView* mPingPongTextureRTV[2];
+	//ID3D11ShaderResourceView* mPingPongTextureSRV[2];
+	//ID3D11UnorderedAccessView* mPingPongTextureUAV[2];
+
+	ID3D11SamplerState* mHierarchicalDepthBufferSS;
+
+	UINT mMipLevels;
+
+	//std::vector<ID3D11RenderTargetView*> mHierarchicalDepthBufferRTV;
+	ID3D11ShaderResourceView* mHierarchicalDepthBufferSRV;
+
+	void ComputeHierarchicalDepthBuffer(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11ShaderResourceView* NormalDepthSRV);
 };
 
 #endif // SSR_H

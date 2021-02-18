@@ -1,116 +1,44 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="Source Files">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
-    </Filter>
-    <Filter Include="Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
-    </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
-    </Filter>
+    <FxCompile Include="DebugQuadPS.hlsl" />
+    <FxCompile Include="DebugQuadVS.hlsl" />
+    <FxCompile Include="DS.hlsl" />
+    <FxCompile Include="HS.hlsl" />
+    <FxCompile Include="PS.hlsl" />
+    <FxCompile Include="ShadowMapPS.hlsl" />
+    <FxCompile Include="ShadowMapSkinnedVS.hlsl" />
+    <FxCompile Include="ShadowMapVS.hlsl" />
+    <FxCompile Include="SkinnedVS.hlsl" />
+    <FxCompile Include="SkyPS.hlsl" />
+    <FxCompile Include="SkyVS.hlsl" />
+    <FxCompile Include="SSAOAmbientMapComputePS.hlsl" />
+    <FxCompile Include="SSAOAmbientMapComputeVS.hlsl" />
+    <FxCompile Include="SSAOBlurPS.hlsl" />
+    <FxCompile Include="SSAOBlurVS.hlsl" />
+    <FxCompile Include="SSAONormalDepthPS.hlsl" />
+    <FxCompile Include="SSAONormalDepthSkinnedVS.hlsl" />
+    <FxCompile Include="SSAONormalDepthVS.hlsl" />
+    <FxCompile Include="SSPRReflectionsMapComputeCS.hlsl" />
+    <FxCompile Include="SSPRReflectionsMapComputePS.hlsl" />
+    <FxCompile Include="SSPRReflectionsMapComputeVS.hlsl" />
+    <FxCompile Include="SSRReflectionsMapComputePS.hlsl" />
+    <FxCompile Include="SSRReflectionsMapComputeVS.hlsl" />
+    <FxCompile Include="VS.hlsl" />
+    <FxCompile Include="SSRComputeHierarchicalDepthBufferCS.hlsl" />
+    <FxCompile Include="SSRCopyDepthBufferCS.hlsl" />
+    <FxCompile Include="SSRComputeHierarchicalDepthBufferPS.hlsl" />
+    <FxCompile Include="SSRComputeHierarchicalDepthBufferVS.hlsl" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="SSR.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="SSPR.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="SSPR.cpp" />
+    <ClCompile Include="SSR.cpp" />
+    <ClCompile Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="DebugQuadPS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="DebugQuadVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="DS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="HS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="PS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="ShadowMapPS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="ShadowMapSkinnedVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="ShadowMapVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SkinnedVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SkyPS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SkyVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSAOAmbientMapComputePS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSAOAmbientMapComputeVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSAOBlurPS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSAOBlurVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSAONormalDepthPS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSAONormalDepthSkinnedVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSAONormalDepthVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="VS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSRReflectionsMapComputeVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSRReflectionsMapComputePS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSPRReflectionsMapComputeCS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSPRReflectionsMapComputePS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-    <FxCompile Include="SSPRReflectionsMapComputeVS.hlsl">
-      <Filter>Source Files</Filter>
-    </FxCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="SSR.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="SSPR.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
+    <ClInclude Include="SSPR.h" />
+    <ClInclude Include="SSR.h" />
+    <ClInclude Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.h" />
   </ItemGroup>
 </Project>

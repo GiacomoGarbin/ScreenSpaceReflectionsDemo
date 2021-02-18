@@ -106,6 +106,7 @@ public:
 
 	SSR mSSR;
 	SSPR mSSPR;
+	bool mEnableSSPR;
 
 	//void DrawSceneToReflectionsMap();
 
@@ -122,7 +123,9 @@ TestApp::TestApp() :
 	mSamplerState(nullptr),
 
 	mSceneAlbedoRTV(nullptr),
-	mSceneAlbedoSRV(nullptr)
+	mSceneAlbedoSRV(nullptr),
+
+	mEnableSSPR(false)
 {
 	mMainWindowTitle = "SSR demo";
 
@@ -859,7 +862,6 @@ void TestApp::OnResize(GLFWwindow* window, int width, int height)
 	mSSAO.mDebugQuad.OnResize(mMainWindowWidth, mMainWindowHeight, AspectRatio());
 
 	mSSR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
-
 	mSSPR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
 
 	// scene albedo RTV and SRV
@@ -1211,7 +1213,7 @@ void TestApp::DrawSceneToSSAONormalDepthMap()
 		mContext->PSSetShaderResources(0, 1, NullSRV);
 	};
 
-	//DrawGameObject(&mGrid);
+	if (!mEnableSSPR) DrawGameObject(&mGrid);
 	DrawGameObject(&mBox);
 	DrawGameObject(&mSkull);
 
@@ -1331,14 +1333,14 @@ void TestApp::DrawScene()
 	mSSAO.BindNormalDepthRenderTarget(mContext, mDepthStencilView);
 	DrawSceneToSSAONormalDepthMap();
 
-	if (!IsKeyPressed(GLFW_KEY_4))
-	{
-		// compute ambient occlusion
-		mSSAO.ComputeAmbientMap(mContext, mCamera);
-		// blur ambient map
-		mSSAO.BlurAmbientMap(mContext, 4);
-	}
-	else
+	//if (!IsKeyPressed(GLFW_KEY_4))
+	//{
+	//	// compute ambient occlusion
+	//	mSSAO.ComputeAmbientMap(mContext, mCamera);
+	//	// blur ambient map
+	//	mSSAO.BlurAmbientMap(mContext, 4);
+	//}
+	//else
 	{
 		mContext->OMSetRenderTargets(1, &mSSAO.GetAmbientMapRTV(), nullptr);
 		mContext->ClearRenderTargetView(mSSAO.GetAmbientMapRTV(), Colors::White);
@@ -1346,8 +1348,11 @@ void TestApp::DrawScene()
 
 	// SSR
 	{
-		//mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
-		mSSPR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
+		// hierarchical depth buffer
+		mSSR.ComputeHierarchicalDepthBuffer(mDevice, mContext, mSSAO.GetNormalDepthSRV());
+
+		mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
+		//mSSPR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
 	}
 
 	// restore back and depth buffers, and viewport
@@ -1519,7 +1524,7 @@ void TestApp::DrawScene()
 
 		// draw without reflection
 		{
-			if (rtv == mRenderTargetView) DrawGameObject(&mGrid, true);
+			if (rtv == mRenderTargetView) DrawGameObject(&mGrid, mEnableSSPR);
 			DrawGameObject(&mBox);
 
 			for (UINT i = 0; i < 5; ++i)
@@ -1686,13 +1691,11 @@ void TestApp::DrawScene()
 	//}
 
 	{
-		//mGrid.mPixelShader = mSSR.mPixelShader;
-		mGrid.mPixelShader = mSSPR.mPixelShader;
+		mGrid.mPixelShader = mEnableSSPR ? mSSPR.mPixelShader : mSSR.mPixelShader;
 
 		// bind reflections map and scene albedo map SRVs
 		ID3D11ShaderResourceView* const SRVs[2] = {
-			//mSSR.mReflectionsMapSRV,
-			mSSPR.mReflectionsMapSRV,
+			mEnableSSPR ? mSSPR.mReflectionsMapSRV : mSSR.mReflectionsMapSRV,
 			mSceneAlbedoSRV
 		};
 		mContext->PSSetShaderResources(5, 2, SRVs);
@@ -1738,8 +1741,14 @@ void TestApp::DrawScene()
 
 	if (IsKeyPressed(GLFW_KEY_5))
 	{
-		//mSSR.mDebugQuad.Draw(mContext, mSSR.mReflectionsMapSRV);
-		mSSPR.mDebugQuad.Draw(mContext, mSSPR.mReflectionsMapSRV);
+		if (mEnableSSPR)
+		{
+			mSSPR.mDebugQuad.Draw(mContext, mSSPR.mReflectionsMapSRV);
+		}
+		else
+		{
+			mSSR.mDebugQuad.Draw(mContext, mSSR.mReflectionsMapSRV);
+		}
 	}
 
 	mSwapChain->Present(0, 0);

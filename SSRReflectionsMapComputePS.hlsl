@@ -6,6 +6,13 @@ cbuffer ConstantBuffer : register(b0)
 	float4x4 gView;
 	float4x4 gViewInverse;
 	float4x4 gReflect;
+
+	float4x4 gViewProj;
+	float4x4 gViewProjInverse;
+
+	float3 gCameraPosition;
+
+	float padding;
 };
 
 struct VertexOut
@@ -17,6 +24,9 @@ struct VertexOut
 
 Texture2D gNormalDepthMap : register(t0);
 SamplerState gNormalDepthSamplerState : register(s2);
+
+Texture2D<float> gHierarchicalDepthBuffer : register(t1);
+SamplerState gHierarchicalDepthBufferSamplerState : register(s3);
 
 float3 GetFullViewPosition(float2 uv, float z)
 {
@@ -72,6 +82,13 @@ float3 GetFullViewPosition(float2 uv)
 //	{
 //		// clip to the near plane
 //		float NearPlaneZ = gFrustumFarCorner[0].z;
+//
+//		//float NearPlaneZ = (2 * gProj._m32) / (2 * gProj._m22 - 2);
+//
+//		//float FarPlaneZ = gProj._m32 / (gProj._m22 - 1);
+//
+//		//float NearPlaneZ = - gProj._m32 / gProj._m22;
+//
 //		maxdistance = ((positionfrom.z + pivot.z * maxdistance) < NearPlaneZ) ? (NearPlaneZ - positionfrom.z) / pivot.z : maxdistance;
 //	}
 //
@@ -191,6 +208,7 @@ float3 GetFullViewPosition(float2 uv)
 //
 //	//visibility *= 1 - smoothstep(-0.17, 0.0, dot(normal, -pivot));
 //
+//	//visibility = 1;
 //
 //	return float4(uv.xy, 0, saturate(visibility));
 //}
@@ -276,223 +294,223 @@ float3 GetFullViewPosition(float2 uv)
 // http://casual-effects.blogspot.com/2014/08/screen-space-ray-tracing.html
 // https://github.com/turanszkij/WickedEngine/blob/master/WickedEngine/ssr_raytraceCS.hlsl
 
-float distanceSquared(float2 a, float2 b) { a -= b; return dot(a, a); }
-
-static const float rayTraceMaxStep = 512.0f; // Maximum number of iterations. Higher gives better images but may be slow.
-static const float rayTraceThicknessOffset = 0.01f; // Increse or decrease thickness for each pixels in the depth buffer. [- / +]
-static const float rayTraceThicknessBias = 0.1f; // Bias to control the growth of the thickness.
-static const bool raytraceThicknessInfinite = false; // Use infinite thickness for maximum performance, but may not be suitable for most scenes.
-static const float rayTraceStrideCutoff = 100.0f; // More distant pixels are smaller in screen space. This value tells at what point to
-
-bool IntersectsDepthBuffer(float sceneZMax, float rayZMin, float rayZMax)
-{
-	// Increase thickness along distance. 
-	float thickness = max(sceneZMax * rayTraceThicknessBias + rayTraceThicknessOffset, 1.0);
-
-	// Effectively remove line/tiny artifacts, mostly caused by Zbuffers precision.
-	float depthScale = min(1.0f, sceneZMax / rayTraceStrideCutoff);
-	sceneZMax += lerp(0.05f, 0.0f, depthScale);
-
-	if (raytraceThicknessInfinite)
-		return (rayZMin >= sceneZMax);
-	else
-		return (rayZMin >= sceneZMax) && (rayZMax - thickness <= sceneZMax);
-}
-
-// Returns true if the ray hit something
-bool TraceScreenSpaceRay(
-	// Camera-space ray origin, which must be within the view volume
-	float3 csOrig,
-
-	// Unit length camera-space ray direction
-	float3 csDir,
-
-	// A projection matrix that maps to pixel coordinates (not [-1, +1]
-	// normalized device coordinates)
-	float4x4 proj,
-
-	// The camera-space Z buffer (all negative values)
-	Texture2D csZBuffer,
-
-	// Dimensions of csZBuffer
-	float2 csZBufferSize,
-
-	// Camera space thickness to ascribe to each pixel in the depth buffer
-	float zThickness,
-
-	// (Negative number)
-	float nearPlaneZ,
-
-	// Step in horizontal or vertical pixels between samples. This is a float
-	// because integer math is slow on GPUs, but should be set to an integer >= 1
-	float stride,
-
-	// Number between 0 and 1 for how far to bump the ray in stride units
-	// to conceal banding artifacts
-	float jitter,
-
-	// Maximum number of iterations. Higher gives better images but may be slow
-	const float maxSteps,
-
-	// Maximum camera-space distance to trace before returning a miss
-	float maxDistance,
-
-	// Pixel coordinates of the first intersection with the scene
-	out float2 hitPixel,
-
-	// Camera space location of the ray hit
-	out float3 hitPoint)
-{
-	hitPixel = 0;
-	hitPoint = 0;
-
-	// Clip to the near plane    
-	float rayLength = ((csOrig.z + csDir.z * maxDistance) < nearPlaneZ) ? (nearPlaneZ - csOrig.z) / csDir.z : maxDistance;
-	float3 csEndPoint = csOrig + csDir * rayLength;
-
-	// Project into homogeneous clip space
-	float4 H0 = mul(proj, float4(csOrig, 1.0f));
-	float4 H1 = mul(proj, float4(csEndPoint, 1.0f));
-
-	float k0 = 1.0f / H0.w;
-	float k1 = 1.0f / H1.w;
-
-	// The interpolated homogeneous version of the camera-space points  
-	float3 Q0 = csOrig * k0;
-	float3 Q1 = csEndPoint * k1;
-
-	// Screen-space endpoints
-	float2 P0 = H0.xy * k0;
-	float2 P1 = H1.xy * k1;
-
-	// Project to pixel
-	P0 = P0 * float2(+0.5f, -0.5f) + float2(0.5f, 0.5f);
-	P1 = P1 * float2(+0.5f, -0.5f) + float2(0.5f, 0.5f);
-
-	//return float4(P0, 0, 1);
-
-	P0.xy *= csZBufferSize.xy;
-	P1.xy *= csZBufferSize.xy;
-
-	// If the line is degenerate, make it cover at least one pixel
-	// to avoid handling zero-pixel extent as a special case later
-	P1 += (distanceSquared(P0, P1) < 0.0001f) ? 0.01f : 0.0f;
-	float2 delta = P1 - P0;
-
-	// Permute so that the primary iteration is in x to collapse
-	// all quadrant-specific DDA cases later
-	bool permute = false;
-	if (abs(delta.x) < abs(delta.y))
-	{
-		// This is a more-vertical line
-		permute = true;
-		delta = delta.yx;
-		P0 = P0.yx;
-		P1 = P1.yx;
-	}
-
-	float stepDir = sign(delta.x);
-	float invdx = stepDir / delta.x;
-
-	// Track the derivatives of Q and k
-	float3 dQ = (Q1 - Q0) * invdx;
-	float  dk = (k1 - k0) * invdx;
-
-	// Because we test 1/2 a texel forward along the ray, on the very last iteration
-	// the interpolation can go past the end of the ray. Use these bounds to clamp it.
-	float zMin = min(csEndPoint.z, csOrig.z);
-	float zMax = max(csEndPoint.z, csOrig.z);
-
-	float2 dP = float2(stepDir, delta.y * invdx);
-
-	// Scale derivatives by the desired pixel stride and then
-	// offset the starting values by the jitter fraction
-	dP *= stride;
-	dQ *= stride;
-	dk *= stride;
-	P0 += dP * jitter;
-	Q0 += dQ * jitter;
-	k0 += dk * jitter;
-
-	float4 PQk = float4(P0, Q0.z, k0);
-	float4 dPQk = float4(dP, dQ.z, dk);
-
-	// Slide P from P0 to P1, (now-homogeneous) Q from Q0 to Q1, k from k0 to k1
-	float3 Q = Q0;
-
-	// Adjust end condition for iteration direction
-	float  end = P1.x * stepDir;
-
-	float k = k0;
-	float stepCount = 0.0f;
-	float prevZMaxEstimate = csOrig.z;
-	float rayZMin = prevZMaxEstimate;
-	float rayZMax = prevZMaxEstimate;
-	float sceneZMax = rayZMax + 100000;
-
-	//for (float2 P = P0;
-	//	((P.x * stepDir) <= end) && (stepCount < maxSteps) &&
-	//	((rayZMax < sceneZMax - zThickness) || (rayZMin > sceneZMax)) &&
-	//	(sceneZMax != 0);
-	//	P += dP, Q.z += dQ.z, k += dk, ++stepCount)
-	//{
-	//	rayZMin = prevZMaxEstimate;
-	//	rayZMax = (dQ.z * 0.5f + Q.z) / (dk * 0.5f + k);
-	//	prevZMaxEstimate = rayZMax;
-	//	if (rayZMin > rayZMax) {
-	//		float t = rayZMin;
-	//		rayZMin = rayZMax;
-	//		rayZMax = t;
-	//	}
-
-	//	hitPixel = permute ? P.yx : P;
-	//	// You may need hitPixel.y = csZBufferSize.y - hitPixel.y; here if your vertical axis
-	//	// is different than ours in screen space
-	//	sceneZMax = csZBuffer.Load(int3(hitPixel, 0));
-	//}
-
-
-	[loop]
-	for (; ((PQk.x * stepDir) <= end) &&
-		(stepCount < rayTraceMaxStep) &&
-		!IntersectsDepthBuffer(sceneZMax, rayZMin, rayZMax) &&
-		(sceneZMax != 0.0f);
-		PQk += dPQk, stepCount++)
-	{
-		if (any(hitPixel < 0.0) || any(hitPixel > 1.0))
-		{
-			return false;
-		}
-
-		rayZMin = prevZMaxEstimate;
-
-		// Compute the value at 1/2 step into the future
-		rayZMax = (dPQk.z * 0.5f + PQk.z) / (dPQk.w * 0.5f + PQk.w);
-		rayZMax = clamp(rayZMax, zMin, zMax);
-
-		prevZMaxEstimate = rayZMax;
-
-		if (rayZMin > rayZMax)
-		{
-			float t = rayZMin;
-			rayZMin = rayZMax;
-			rayZMax = t;
-		}
-
-		hitPixel = permute ? PQk.yx : PQk.xy;
-		hitPixel *= 1 / csZBufferSize;
-
-		//sceneZMax = getLinearDepth(texture_depth.SampleLevel(sampler_point_clamp, hitPixel, 0).r);
-		sceneZMax = csZBuffer.SampleLevel(gNormalDepthSamplerState, hitPixel, 0).w;
-	}
-
-	// Advance Q based on the number of steps
-	Q.xy += dQ.xy * stepCount;
-	Q.z = PQk.z;
-	hitPoint = Q * (1.0f / PQk.w);
-
-	return IntersectsDepthBuffer(sceneZMax, rayZMin, rayZMax);
-}
+//float distanceSquared(float2 a, float2 b) { a -= b; return dot(a, a); }
+//
+//static const float rayTraceMaxStep = 512.0f; // Maximum number of iterations. Higher gives better images but may be slow.
+//static const float rayTraceThicknessOffset = 0.01f; // Increse or decrease thickness for each pixels in the depth buffer. [- / +]
+//static const float rayTraceThicknessBias = 0.1f; // Bias to control the growth of the thickness.
+//static const bool raytraceThicknessInfinite = false; // Use infinite thickness for maximum performance, but may not be suitable for most scenes.
+//static const float rayTraceStrideCutoff = 100.0f; // More distant pixels are smaller in screen space. This value tells at what point to
+//
+//bool IntersectsDepthBuffer(float sceneZMax, float rayZMin, float rayZMax)
+//{
+//	// Increase thickness along distance. 
+//	float thickness = max(sceneZMax * rayTraceThicknessBias + rayTraceThicknessOffset, 1.0);
+//
+//	// Effectively remove line/tiny artifacts, mostly caused by Zbuffers precision.
+//	float depthScale = min(1.0f, sceneZMax / rayTraceStrideCutoff);
+//	sceneZMax += lerp(0.05f, 0.0f, depthScale);
+//
+//	if (raytraceThicknessInfinite)
+//		return (rayZMin >= sceneZMax);
+//	else
+//		return (rayZMin >= sceneZMax) && (rayZMax - thickness <= sceneZMax);
+//}
+//
+//// Returns true if the ray hit something
+//bool TraceScreenSpaceRay(
+//	// Camera-space ray origin, which must be within the view volume
+//	float3 csOrig,
+//
+//	// Unit length camera-space ray direction
+//	float3 csDir,
+//
+//	// A projection matrix that maps to pixel coordinates (not [-1, +1]
+//	// normalized device coordinates)
+//	float4x4 proj,
+//
+//	// The camera-space Z buffer (all negative values)
+//	Texture2D csZBuffer,
+//
+//	// Dimensions of csZBuffer
+//	float2 csZBufferSize,
+//
+//	// Camera space thickness to ascribe to each pixel in the depth buffer
+//	float zThickness,
+//
+//	// (Negative number)
+//	float nearPlaneZ,
+//
+//	// Step in horizontal or vertical pixels between samples. This is a float
+//	// because integer math is slow on GPUs, but should be set to an integer >= 1
+//	float stride,
+//
+//	// Number between 0 and 1 for how far to bump the ray in stride units
+//	// to conceal banding artifacts
+//	float jitter,
+//
+//	// Maximum number of iterations. Higher gives better images but may be slow
+//	const float maxSteps,
+//
+//	// Maximum camera-space distance to trace before returning a miss
+//	float maxDistance,
+//
+//	// Pixel coordinates of the first intersection with the scene
+//	out float2 hitPixel,
+//
+//	// Camera space location of the ray hit
+//	out float3 hitPoint)
+//{
+//	hitPixel = 0;
+//	hitPoint = 0;
+//
+//	// Clip to the near plane    
+//	float rayLength = ((csOrig.z + csDir.z * maxDistance) < nearPlaneZ) ? (nearPlaneZ - csOrig.z) / csDir.z : maxDistance;
+//	float3 csEndPoint = csOrig + csDir * rayLength;
+//
+//	// Project into homogeneous clip space
+//	float4 H0 = mul(proj, float4(csOrig, 1.0f));
+//	float4 H1 = mul(proj, float4(csEndPoint, 1.0f));
+//
+//	float k0 = 1.0f / H0.w;
+//	float k1 = 1.0f / H1.w;
+//
+//	// The interpolated homogeneous version of the camera-space points  
+//	float3 Q0 = csOrig * k0;
+//	float3 Q1 = csEndPoint * k1;
+//
+//	// Screen-space endpoints
+//	float2 P0 = H0.xy * k0;
+//	float2 P1 = H1.xy * k1;
+//
+//	// Project to pixel
+//	P0 = P0 * float2(+0.5f, -0.5f) + float2(0.5f, 0.5f);
+//	P1 = P1 * float2(+0.5f, -0.5f) + float2(0.5f, 0.5f);
+//
+//	//return float4(P0, 0, 1);
+//
+//	P0.xy *= csZBufferSize.xy;
+//	P1.xy *= csZBufferSize.xy;
+//
+//	// If the line is degenerate, make it cover at least one pixel
+//	// to avoid handling zero-pixel extent as a special case later
+//	P1 += (distanceSquared(P0, P1) < 0.0001f) ? 0.01f : 0.0f;
+//	float2 delta = P1 - P0;
+//
+//	// Permute so that the primary iteration is in x to collapse
+//	// all quadrant-specific DDA cases later
+//	bool permute = false;
+//	if (abs(delta.x) < abs(delta.y))
+//	{
+//		// This is a more-vertical line
+//		permute = true;
+//		delta = delta.yx;
+//		P0 = P0.yx;
+//		P1 = P1.yx;
+//	}
+//
+//	float stepDir = sign(delta.x);
+//	float invdx = stepDir / delta.x;
+//
+//	// Track the derivatives of Q and k
+//	float3 dQ = (Q1 - Q0) * invdx;
+//	float  dk = (k1 - k0) * invdx;
+//
+//	// Because we test 1/2 a texel forward along the ray, on the very last iteration
+//	// the interpolation can go past the end of the ray. Use these bounds to clamp it.
+//	float zMin = min(csEndPoint.z, csOrig.z);
+//	float zMax = max(csEndPoint.z, csOrig.z);
+//
+//	float2 dP = float2(stepDir, delta.y * invdx);
+//
+//	// Scale derivatives by the desired pixel stride and then
+//	// offset the starting values by the jitter fraction
+//	dP *= stride;
+//	dQ *= stride;
+//	dk *= stride;
+//	P0 += dP * jitter;
+//	Q0 += dQ * jitter;
+//	k0 += dk * jitter;
+//
+//	float4 PQk = float4(P0, Q0.z, k0);
+//	float4 dPQk = float4(dP, dQ.z, dk);
+//
+//	// Slide P from P0 to P1, (now-homogeneous) Q from Q0 to Q1, k from k0 to k1
+//	float3 Q = Q0;
+//
+//	// Adjust end condition for iteration direction
+//	float  end = P1.x * stepDir;
+//
+//	float k = k0;
+//	float stepCount = 0.0f;
+//	float prevZMaxEstimate = csOrig.z;
+//	float rayZMin = prevZMaxEstimate;
+//	float rayZMax = prevZMaxEstimate;
+//	float sceneZMax = rayZMax + 100000;
+//
+//	//for (float2 P = P0;
+//	//	((P.x * stepDir) <= end) && (stepCount < maxSteps) &&
+//	//	((rayZMax < sceneZMax - zThickness) || (rayZMin > sceneZMax)) &&
+//	//	(sceneZMax != 0);
+//	//	P += dP, Q.z += dQ.z, k += dk, ++stepCount)
+//	//{
+//	//	rayZMin = prevZMaxEstimate;
+//	//	rayZMax = (dQ.z * 0.5f + Q.z) / (dk * 0.5f + k);
+//	//	prevZMaxEstimate = rayZMax;
+//	//	if (rayZMin > rayZMax) {
+//	//		float t = rayZMin;
+//	//		rayZMin = rayZMax;
+//	//		rayZMax = t;
+//	//	}
+//
+//	//	hitPixel = permute ? P.yx : P;
+//	//	// You may need hitPixel.y = csZBufferSize.y - hitPixel.y; here if your vertical axis
+//	//	// is different than ours in screen space
+//	//	sceneZMax = csZBuffer.Load(int3(hitPixel, 0));
+//	//}
+//
+//
+//	[loop]
+//	for (; ((PQk.x * stepDir) <= end) &&
+//		(stepCount < rayTraceMaxStep) &&
+//		!IntersectsDepthBuffer(sceneZMax, rayZMin, rayZMax) &&
+//		(sceneZMax != 0.0f);
+//		PQk += dPQk, stepCount++)
+//	{
+//		if (any(hitPixel < 0.0) || any(hitPixel > 1.0))
+//		{
+//			return false;
+//		}
+//
+//		rayZMin = prevZMaxEstimate;
+//
+//		// Compute the value at 1/2 step into the future
+//		rayZMax = (dPQk.z * 0.5f + PQk.z) / (dPQk.w * 0.5f + PQk.w);
+//		rayZMax = clamp(rayZMax, zMin, zMax);
+//
+//		prevZMaxEstimate = rayZMax;
+//
+//		if (rayZMin > rayZMax)
+//		{
+//			float t = rayZMin;
+//			rayZMin = rayZMax;
+//			rayZMax = t;
+//		}
+//
+//		hitPixel = permute ? PQk.yx : PQk.xy;
+//		hitPixel *= 1 / csZBufferSize;
+//
+//		//sceneZMax = getLinearDepth(texture_depth.SampleLevel(sampler_point_clamp, hitPixel, 0).r);
+//		sceneZMax = csZBuffer.SampleLevel(gNormalDepthSamplerState, hitPixel, 0).w;
+//	}
+//
+//	// Advance Q based on the number of steps
+//	Q.xy += dQ.xy * stepCount;
+//	Q.z = PQk.z;
+//	hitPoint = Q * (1.0f / PQk.w);
+//
+//	return IntersectsDepthBuffer(sceneZMax, rayZMin, rayZMax);
+//}
 
 //float4 main(VertexOut pin) : SV_Target
 //{
@@ -538,44 +556,280 @@ bool TraceScreenSpaceRay(
 //}
 
 
-// 4th ATTEMPT
 // GPU Pro5: Advanced Rendering Techniques -> Hi-Z Screen-Space Cone-Traced Reflections (Yasin Uludag)
 // http://bitsquid.blogspot.com/2017/08/notes-on-screen-space-hiz-tracing.html
 
 
-// 5th ATTEMPT
+// 4th ATTEMPT
+// https://sakibsaikia.github.io/graphics/2016/12/26/Screen-Space-Reflection-in-Killing-Floor-2.html
 
-float4 main(VertexOut pin) : SV_Target
+float3 GetFullWorldPosition(float4 PositionNDC)
 {
-	float DepthScale = 0.05f;
+	float4 PositionW = mul(gViewProjInverse, PositionNDC);
+	PositionW.xyz /= PositionW.w;
+	PositionW.w = 1;
+	return PositionW;
+}
 
-	// view space normal and depth (z-coord) of this pixel
+#define MAX_REFLECTION_RAY_MARCH_STEP 0.02f
+#define NUM_RAY_MARCH_SAMPLES 32
+#define NUM_BINARY_SEARCH_SAMPLES 6
+#define RAY_MARH_BIAS 0.001f
+
+float GetDitherOffset(float2 uv)
+{
+	uv = floor(frac(uv) * 4);
+
+	float4x4 dither =
+	{
+		{  0,  8,  2, 10 },
+		{ 12,  4, 14,  6 },
+		{  3, 11,  1,  9 },
+		{ 15,  7, 13,  5 },
+	};
+
+	return dither[uv.x][uv.y];
+}
+
+float GetReflection(
+	float3 ScreenSpaceReflectionVec,
+	float3 ScreenSpacePos,
+	out float3 ReflectionColor)
+{
+	// Raymarch in the direction of the ScreenSpaceReflectionVec until you get an intersection with your z buffer
+	for (int RayStepIdx = 1; RayStepIdx < NUM_RAY_MARCH_SAMPLES; RayStepIdx++)
+	{
+		float3 PrevRaySample = ((RayStepIdx - 1) * MAX_REFLECTION_RAY_MARCH_STEP) * ScreenSpaceReflectionVec + ScreenSpacePos;
+		float3 RaySample = (RayStepIdx * MAX_REFLECTION_RAY_MARCH_STEP) * ScreenSpaceReflectionVec + ScreenSpacePos;
+
+		// Dithered offset for raymarching to prevent banding artifacts
+		float DitherTilingFactor = 1000;
+		//float DitherOffset = DitherTexture.SampleLevel(InUV * DitherTilingFactor, 0).r * 0.01f + RAY_MARH_BIAS;
+		float DitherOffset = GetDitherOffset(ScreenSpacePos.xy * DitherTilingFactor) * 0.01f + RAY_MARH_BIAS;
+		RaySample += DitherOffset * ScreenSpaceReflectionVec;
+
+		float ZBufferVal = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, RaySample.xy, 0).w;
+
+		float2 UVSamplingAttenuation = smoothstep(0.05, 0.1, RaySample.xy) * (1 - smoothstep(0.95, 1, RaySample.xy));
+		UVSamplingAttenuation.x *= UVSamplingAttenuation.y;
+
+		if (UVSamplingAttenuation.x > 0)
+		{
+			// sample z-buffer and perform intersection check
+		}
+		else
+		{
+			return 0;
+		}
+
+		if (RaySample.z > ZBufferVal)
+		{
+			// binary search
+			{
+				float3 MinRaySample = PrevRaySample;
+				float3 MaxRaySample = RaySample;
+				float3 MidRaySample;
+
+				for (int i = 0; i < NUM_BINARY_SEARCH_SAMPLES; i++)
+				{
+					MidRaySample = lerp(MinRaySample, MaxRaySample, 0.5);
+					float ZBufferVal = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, MidRaySample.xy, 0).w;
+
+					if (MidRaySample.z > ZBufferVal)
+					{
+						MaxRaySample = MidRaySample;
+					}
+					else
+					{
+						MinRaySample = MidRaySample;
+					}
+				}
+
+				ReflectionColor = float3(MidRaySample.xy, 0);
+			}
+
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+// Constant offset to make sure you cross to the next cell
+#define CELL_STEP_OFFSET 0.05
+
+void StepThroughCell(inout float3 RaySample, float3 RayDir, int MipLevel)
+{
+	// Size of current mip 
+	int2 MipSize; // = int2(BufferSize) >> MipLevel;
+	float NumDepthMips;
+	gHierarchicalDepthBuffer.GetDimensions(MipLevel, MipSize.x, MipSize.y, NumDepthMips);
+
+	// UV converted to index in the mip
+	float2 MipCellIndex = RaySample.xy * float2(MipSize);
+
+	//
+	// Find the cell boundary UV based on the direction of the ray
+	// Take floor() or ceil() depending on the sign of RayDir.xy
+	//
+	float2 BoundaryUV;
+	BoundaryUV.x = RayDir.x > 0 ? ceil(MipCellIndex.x) / float(MipSize.x) : floor(MipCellIndex.x) / float(MipSize.x);
+	BoundaryUV.y = RayDir.y > 0 ? ceil(MipCellIndex.y) / float(MipSize.y) : floor(MipCellIndex.y) / float(MipSize.y);
+
+	//
+	// We can now represent the cell boundary as being formed by the intersection of 
+	// two lines which can be represented by 
+	//
+	// x = BoundaryUV.x
+	// y = BoundaryUV.y
+	//
+	// Intersect the parametric equation of the Ray with each of these lines
+	//
+	float2 t;
+	t.x = (BoundaryUV.x - RaySample.x) / RayDir.x;
+	t.y = (BoundaryUV.y - RaySample.y) / RayDir.y;
+
+	// Pick the cell intersection that is closer, and march to that cell
+	if (abs(t.x) < abs(t.y))
+	{
+		RaySample += (t.x + CELL_STEP_OFFSET / MipSize.x) * RayDir;
+	}
+	else
+	{
+		RaySample += (t.y + CELL_STEP_OFFSET / MipSize.y) * RayDir;
+	}
+}
+
+float GetReflectionHiZ(
+	float3 ScreenSpaceReflectionVec,
+	float3 ScreenSpacePos,
+	out float3 ReflectionColor)
+{
+	float NumDepthMips;
+	uint2 size;
+	gHierarchicalDepthBuffer.GetDimensions(0, size.x, size.y, NumDepthMips);
+
+	float3 RaySample = ScreenSpacePos;
+
+	int LoopLimit = 1000;
+
+	int MipLevel = 0;
+	while (MipLevel > -1 && MipLevel < (NumDepthMips - 1) && LoopLimit > 0)
+	{
+		LoopLimit--;
+
+		// Cross a single texel in the HZB for the current MipLevel
+		StepThroughCell(RaySample, ScreenSpaceReflectionVec, MipLevel);
+
+		// Constrain raymarch UV to (0-1) range with a falloff
+		float2 UVSamplingAttenuation = smoothstep(0.05, 0.1, RaySample.xy) * (1 - smoothstep(0.95, 1, RaySample.xy));
+
+		if (any(UVSamplingAttenuation))
+		{
+			float ZBufferValue = gHierarchicalDepthBuffer.SampleLevel(gHierarchicalDepthBufferSamplerState, RaySample.xy, MipLevel).r;
+
+			if (RaySample.z < ZBufferValue)
+			{
+				// If we did not intersect, perform successive test on the next
+				// higher mip level (and thus take larger steps)
+				MipLevel++;
+			}
+			else
+			{
+				// If we intersected, pull back the ray to the point of intersection (for that miplevel)
+				float t = (RaySample.z - ZBufferValue) / ScreenSpaceReflectionVec.z;
+				RaySample -= ScreenSpaceReflectionVec * t;
+
+				// And, then perform successive test on the next lower mip level.
+				// Once we've got a valid intersection with mip 0, we've found our intersection point
+				MipLevel--;
+			}
+		}
+		else
+		{
+			//break;
+			return 0;
+		}
+	}
+
+	float ZBufferVal = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, RaySample.xy, 0).w;
+
+	if (RaySample.z > ZBufferVal)
+	{
+		// binary search
+		{
+			//float3 MinRaySample = PrevRaySample;
+			//float3 MaxRaySample = RaySample;
+			//float3 MidRaySample;
+
+			//for (int i = 0; i < NUM_BINARY_SEARCH_SAMPLES; i++)
+			//{
+			//	MidRaySample = lerp(MinRaySample, MaxRaySample, 0.5);
+			//	float ZBufferVal = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, MidRaySample.xy, 0).w;
+
+			//	if (MidRaySample.z > ZBufferVal)
+			//	{
+			//		MaxRaySample = MidRaySample;
+			//	}
+			//	else
+			//	{
+			//		MinRaySample = MidRaySample;
+			//	}
+			//}
+
+			//ReflectionColor = float3(MidRaySample.xy, 0);
+			ReflectionColor = float3(RaySample.xy, 0);
+		}
+
+		return 1;
+	}
+
+	return 0;
+}
+
+float4 main(VertexOut pin) : sv_target
+{
+	float2 PixelUV = pin.TexCoord;
+	float2 NDCPos = float2(+2.f, -2.f) * PixelUV + float2(-1.f, +1.f);
+
+	// Prerequisites
 	float4 NormalDepth = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, pin.TexCoord, 0);
-	float3 normal = normalize(NormalDepth.xyz);
-	float  depth  = NormalDepth.w;
-	//return float4(NormalDepth.www * DepthScale, 0);
 
-	float3 PosVS = GetFullViewPosition(pin.TexCoord, depth);
-	//return float4(PosVS, 0);
-	//return float4(PosVS.zzz * DepthScale, 0);
+	float  DeviceZ = NormalDepth.w;
+	float3 WorldPosition = GetFullWorldPosition(float4(NDCPos, DeviceZ, 1));
+	float3 CameraVector = normalize(WorldPosition - gCameraPosition);
+	float3 WorldNormal = mul(gViewInverse, float4(NormalDepth.xyz, 0));
 
-	float3 PosWS = mul(gViewInverse, float4(PosVS, 1)).xyz;
-	//return float4(PosWS, 0);
+	// ScreenSpacePos --> (screencoord.xy, device_z)
+	float4 ScreenSpacePos = float4(PixelUV, DeviceZ, 1.f);
 
-	float3 HitPointWS = mul(gReflect, float4(PosWS, 1)).xyz;
-	//return float4(HitPointWS, 0);
+	// Compute world space reflection vector
+	float3 ReflectionVector = reflect(CameraVector, WorldNormal);
 
-	float3 HitPointVS = mul(gView, float4(HitPointWS, 1)).xyz;
-	//return float4(HitPointVS, 0);
-	//return float4(HitPointVS.zzz * DepthScale, 0);
+	float CameraFacingReflectionAttenuation = 1 - smoothstep(0.25, 0.5, dot(-CameraVector, ReflectionVector));
 
-	float4 HitPixel = mul(gProj, float4(HitPointVS, 1));
-	HitPixel.xy /= HitPixel.w;
-	HitPixel.xy = HitPixel.xy * float2(+0.5f, -0.5f) + 0.5f;
+	// Reject if the reflection vector is pointing back at the viewer.
+	if (CameraFacingReflectionAttenuation <= 0)
+	{
+		return float4(0, 0, 0, 0);
+	}
 
-	//HitPixel.y = 1 - HitPixel.y;
+	// Compute second sreen space point so that we can get the SS reflection vector
+	float4 PointAlongReflectionVec = float4(10.f * ReflectionVector + WorldPosition, 1.f);
+	float4 ScreenSpaceReflectionPoint = mul(gViewProj, PointAlongReflectionVec);
+	ScreenSpaceReflectionPoint /= ScreenSpaceReflectionPoint.w;
+	ScreenSpaceReflectionPoint.xy = ScreenSpaceReflectionPoint.xy * float2(+0.5, -0.5) + float2(0.5, 0.5);
 
-	float visibility = (any(HitPixel.xy < float2(0, 0)) || any(HitPixel.xy > float2(1, 1))) ? 0 : 1;
+	// Compute the sreen space reflection vector as the difference of the two screen space points
+	float3 ScreenSpaceReflectionVec = normalize(ScreenSpaceReflectionPoint.xyz - ScreenSpacePos.xyz);
 
-	return float4(HitPixel.xy, 0, visibility);
+	float3 OutReflectionColor;
+	//float a = GetReflection(ScreenSpaceReflectionVec, ScreenSpacePos.xyz, OutReflectionColor);
+	float a = GetReflectionHiZ(ScreenSpaceReflectionVec, ScreenSpacePos.xyz, OutReflectionColor);
+
+	float3 ReflectionNormal = WorldNormal;
+	float DirectionBasedAttenuation = smoothstep(-1.7f, 0, dot(ReflectionNormal, -ReflectionVector));
+	a *= DirectionBasedAttenuation;
+
+	return float4(OutReflectionColor, a);
 }
