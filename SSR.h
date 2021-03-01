@@ -29,6 +29,8 @@ public:
 		XMFLOAT4X4 ViewProj;
 		XMFLOAT4X4 ViewProjInverse;
 
+		XMFLOAT4X4 ProjInverse;
+
 		XMFLOAT3 CameraPosition;
 		
 		float padding;

@@ -10,6 +10,8 @@ cbuffer ConstantBuffer : register(b0)
 	float4x4 gViewProj;
 	float4x4 gViewProjInverse;
 
+	float4x4 gProjInverse;
+
 	float3 gCameraPosition;
 
 	float padding;
@@ -673,8 +675,8 @@ void StepThroughCell(inout float3 RaySample, float3 RayDir, int MipLevel)
 	// Take floor() or ceil() depending on the sign of RayDir.xy
 	//
 	float2 BoundaryUV;
-	BoundaryUV.x = RayDir.x > 0 ? ceil(MipCellIndex.x) / float(MipSize.x) : floor(MipCellIndex.x) / float(MipSize.x);
-	BoundaryUV.y = RayDir.y > 0 ? ceil(MipCellIndex.y) / float(MipSize.y) : floor(MipCellIndex.y) / float(MipSize.y);
+	BoundaryUV.x = (RayDir.x > 0 ? ceil(MipCellIndex.x) : floor(MipCellIndex.x)) / float(MipSize.x);
+	BoundaryUV.y = (RayDir.y > 0 ? ceil(MipCellIndex.y) : floor(MipCellIndex.y)) / float(MipSize.y);
 
 	//
 	// We can now represent the cell boundary as being formed by the intersection of 
@@ -736,6 +738,38 @@ float GetReflectionHiZ(
 			}
 			else
 			{
+				if (MipLevel == 0)
+				{
+					//// binary search
+					//{
+					//	float t = (RaySample.z - ZBufferValue) / ScreenSpaceReflectionVec.z;
+					//	float3 MinRaySample = RaySample - ScreenSpaceReflectionVec * t;
+					//	float3 MaxRaySample = RaySample;
+					//	float3 MidRaySample;
+
+					//	for (int i = 0; i < NUM_BINARY_SEARCH_SAMPLES; i++)
+					//	{
+					//		MidRaySample = lerp(MinRaySample, MaxRaySample, 0.5);
+					//		float ZBufferVal = gHierarchicalDepthBuffer.SampleLevel(gHierarchicalDepthBufferSamplerState, MidRaySample.xy, MipLevel).r;
+
+					//		if (MidRaySample.z > ZBufferVal)
+					//		{
+					//			MaxRaySample = MidRaySample;
+					//		}
+					//		else
+					//		{
+					//			MinRaySample = MidRaySample;
+					//		}
+					//	}
+
+					//	ReflectionColor = float3(MidRaySample.xy, 0);
+					//	return 1;
+					//}
+
+					ReflectionColor = float3(RaySample.xy, 0);
+					return 1;
+				}
+
 				// If we intersected, pull back the ray to the point of intersection (for that miplevel)
 				float t = (RaySample.z - ZBufferValue) / ScreenSpaceReflectionVec.z;
 				RaySample -= ScreenSpaceReflectionVec * t;
@@ -754,7 +788,7 @@ float GetReflectionHiZ(
 
 	float ZBufferVal = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, RaySample.xy, 0).w;
 
-	if (RaySample.z > ZBufferVal)
+	//if (RaySample.z > ZBufferVal)
 	{
 		// binary search
 		{
@@ -781,10 +815,114 @@ float GetReflectionHiZ(
 			ReflectionColor = float3(RaySample.xy, 0);
 		}
 
-		return 1;
+		//return 1;
 	}
 
 	return 0;
+}
+
+// http://bitsquid.blogspot.com/2017/08/notes-on-screen-space-hiz-tracing.html
+
+#define HIZ_START_LEVEL 2
+#define HIZ_STOP_LEVEL 8
+#define HIZ_MAX_LEVEL 8
+#define MAX_ITERATIONS 32
+
+float2 cell(float2 ray, float2 cell_count)
+{
+	return floor(ray.xy * cell_count);
+}
+
+float2 cell_count(float level)
+{
+	float2 size;
+	gHierarchicalDepthBuffer.GetDimensions(size.x, size.y);
+
+	return size / (level == 0.0 ? 1.0 : exp2(level));
+}
+
+float3 intersect_cell_boundary(float3 pos, float3 dir, float2 cell_id, float2 cell_count, float2 cross_step, float2 cross_offset)
+{
+	float2 cell_size = 1.0 / cell_count;
+	float2 planes = cell_id / cell_count + cell_size * cross_step;
+
+	float2 solutions = (planes - pos) / dir.xy;
+	float3 intersection_pos = pos + dir * min(solutions.x, solutions.y);
+
+	intersection_pos.xy += (solutions.x < solutions.y) ? float2(cross_offset.x, 0.0) : float2(0.0, cross_offset.y);
+
+	return intersection_pos;
+}
+
+bool crossed_cell_boundary(float2 cell_id_one, float2 cell_id_two)
+{
+	return (int)cell_id_one.x != (int)cell_id_two.x || (int)cell_id_one.y != (int)cell_id_two.y;
+}
+
+float minimum_depth_plane(float2 ray, float level, float2 cell_count)
+{
+	return gHierarchicalDepthBuffer.Load(int3(ray.xy * cell_count, level)).r;
+}
+
+float3 hi_z_trace(float3 p, float3 v, out uint iterations)
+{
+	float level = HIZ_START_LEVEL;
+	float3 v_z = v / v.z;
+	float2 hi_z_size = cell_count(level);
+	float3 ray = p;
+
+	float2 cross_step = float2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
+	float2 cross_offset = cross_step * 0.00001;
+	cross_step = saturate(cross_step);
+
+	float2 ray_cell = cell(ray.xy, hi_z_size.xy);
+	ray = intersect_cell_boundary(ray, v, ray_cell, hi_z_size, cross_step, cross_offset);
+
+	iterations = 0;
+	while (level >= HIZ_STOP_LEVEL && iterations < MAX_ITERATIONS)
+	{
+		// get the cell number of the current ray
+		float2 current_cell_count = cell_count(level);
+		float2 old_cell_id = cell(ray.xy, current_cell_count);
+
+		// get the minimum depth plane in which the current ray resides
+		float min_z = minimum_depth_plane(ray.xy, level, current_cell_count);
+
+		// intersect only if ray depth is below the minimum depth plane
+		float3 tmp_ray = ray;
+		if (v.z > 0)
+		{
+			float min_minus_ray = min_z - ray.z;
+			tmp_ray = min_minus_ray > 0 ? ray + v_z * min_minus_ray : tmp_ray;
+			float2 new_cell_id = cell(tmp_ray.xy, current_cell_count);
+
+			if (crossed_cell_boundary(old_cell_id, new_cell_id))
+			{
+				tmp_ray = intersect_cell_boundary(ray, v, old_cell_id, current_cell_count, cross_step, cross_offset);
+				level = min(HIZ_MAX_LEVEL, level + 2.0f);
+			}
+			else
+			{
+				if (level == 1 && abs(min_minus_ray) > 0.0001)
+				{
+					tmp_ray = intersect_cell_boundary(ray, v, old_cell_id, current_cell_count, cross_step, cross_offset);
+					level = 2;
+				}
+			}
+		}
+		else if (ray.z < min_z)
+		{
+			tmp_ray = intersect_cell_boundary(ray, v, old_cell_id, current_cell_count, cross_step, cross_offset);
+			level = min(HIZ_MAX_LEVEL, level + 2.0f);
+		}
+
+		ray.xyz = tmp_ray.xyz;
+		--level;
+
+		++iterations;
+	}
+
+	return ray;
 }
 
 float4 main(VertexOut pin) : sv_target
@@ -798,7 +936,7 @@ float4 main(VertexOut pin) : sv_target
 	float  DeviceZ = NormalDepth.w;
 	float3 WorldPosition = GetFullWorldPosition(float4(NDCPos, DeviceZ, 1));
 	float3 CameraVector = normalize(WorldPosition - gCameraPosition);
-	float3 WorldNormal = mul(gViewInverse, float4(NormalDepth.xyz, 0));
+	float3 WorldNormal = mul(gViewInverse, float4(NormalDepth.xyz, 0)).xyz;
 
 	// ScreenSpacePos --> (screencoord.xy, device_z)
 	float4 ScreenSpacePos = float4(PixelUV, DeviceZ, 1.f);
@@ -825,7 +963,11 @@ float4 main(VertexOut pin) : sv_target
 
 	float3 OutReflectionColor;
 	//float a = GetReflection(ScreenSpaceReflectionVec, ScreenSpacePos.xyz, OutReflectionColor);
-	float a = GetReflectionHiZ(ScreenSpaceReflectionVec, ScreenSpacePos.xyz, OutReflectionColor);
+	//float a = GetReflectionHiZ(ScreenSpaceReflectionVec, ScreenSpacePos.xyz, OutReflectionColor);
+
+	uint iterations = 0;
+	float a = 1;
+	OutReflectionColor = hi_z_trace(ScreenSpacePos.xyz, ScreenSpaceReflectionVec, iterations);
 
 	float3 ReflectionNormal = WorldNormal;
 	float DirectionBasedAttenuation = smoothstep(-1.7f, 0, dot(ReflectionNormal, -ReflectionVector));
@@ -833,3 +975,307 @@ float4 main(VertexOut pin) : sv_target
 
 	return float4(OutReflectionColor, a);
 }
+
+//// https://github.com/GPUOpen-Effects/FidelityFX-SSSR/blob/master/ffx-sssr/ffx_sssr.h
+//
+//#define FFX_SSSR_FLOAT_MAX 3.402823466e+38
+//
+//float3x3 CreateTBN(float3 N)
+//{
+//	float3 U;
+//	if (abs(N.z) > 0.0)
+//	{
+//		float k = sqrt(N.y * N.y + N.z * N.z);
+//		U.x = 0.0; U.y = -N.z / k; U.z = N.y / k;
+//	}
+//	else
+//	{
+//		float k = sqrt(N.x * N.x + N.y * N.y);
+//		U.x = N.y / k; U.y = -N.x / k; U.z = 0.0;
+//	}
+//
+//	float3x3 TBN;
+//	TBN[0] = U;
+//	TBN[1] = cross(N, U);
+//	TBN[2] = N;
+//	return transpose(TBN);
+//}
+//
+//// Blue Noise Sampler by Eric Heitz. Returns a value in the range [0, 1].
+//float SampleRandomNumber(uint pixel_i, uint pixel_j, uint sample_index, uint sample_dimension)
+//{
+//	// Wrap arguments
+//	pixel_i = pixel_i & 127u;
+//	pixel_j = pixel_j & 127u;
+//	sample_index = sample_index & 255u;
+//	sample_dimension = sample_dimension & 255u;
+//
+//#ifndef SPP
+//#define SPP 1
+//#endif
+//
+//#if SPP == 1
+//	const uint ranked_sample_index = sample_index ^ 0;
+//#else
+//	// xor index based on optimized ranking
+//	const uint ranked_sample_index = sample_index ^ g_ranking_tile_buffer[sample_dimension + (pixel_i + pixel_j * 128u) * 8u];
+//#endif
+//
+//	// Fetch value in sequence
+//	uint value = g_sobol_buffer[sample_dimension + ranked_sample_index * 256u];
+//
+//	// If the dimension is optimized, xor sequence value based on optimized scrambling
+//	value = value ^ g_scrambling_tile_buffer[(sample_dimension % 8u) + (pixel_i + pixel_j * 128u) * 8u];
+//
+//	// Convert to float and return
+//	return (value + 0.5f) / 256.0f;
+//}
+//
+//float2 SampleRandomVector2D(uint2 pixel) {
+//	float2 u = float2(
+//		fmod(SampleRandomNumber(pixel.x, pixel.y, 0, 0u) + (g_frame_index & 0xFFu) * GOLDEN_RATIO, 1.0f),
+//		fmod(SampleRandomNumber(pixel.x, pixel.y, 0, 1u) + (g_frame_index & 0xFFu) * GOLDEN_RATIO, 1.0f));
+//	return u;
+//}
+//
+//float3 SampleReflectionVector(float3 view_direction, float3 normal, float roughness, int2 dispatch_thread_id) {
+//	float3x3 tbn_transform = CreateTBN(normal);
+//	float3 view_direction_tbn = mul(-view_direction, tbn_transform);
+//
+//	float2 u = SampleRandomVector2D(dispatch_thread_id);
+//
+//	float3 sampled_normal_tbn = Sample_GGX_VNDF_Hemisphere(view_direction_tbn, roughness, u.x, u.y);
+//#ifdef PERFECT_REFLECTIONS
+//	sampled_normal_tbn = float3(0, 0, 1); // Overwrite normal sample to produce perfect reflection.
+//#endif
+//
+//	float3 reflected_direction_tbn = reflect(-view_direction_tbn, sampled_normal_tbn);
+//
+//	// Transform reflected_direction back to the initial space.
+//	float3x3 inv_tbn_transform = transpose(tbn_transform);
+//	return mul(reflected_direction_tbn, inv_tbn_transform);
+//}
+//
+//// Mat must be able to transform origin from texture space to a linear space.
+//float3 InvProjectPosition(float3 coord, float4x4 mat) {
+//	coord.y = (1 - coord.y);
+//	coord.xy = 2 * coord.xy - 1;
+//	float4 projected = mul(float4(coord, 1), mat);
+//	projected.xyz /= projected.w;
+//	return projected.xyz;
+//}
+//
+//// Origin and direction must be in the same space and mat must be able to transform from that space into clip space.
+//float3 ProjectDirection(float3 origin, float3 direction, float3 screen_space_origin, float4x4 mat) {
+//	float3 offsetted = ProjectPosition(origin + direction, mat);
+//	return offsetted - screen_space_origin;
+//}
+//
+//float3 ScreenSpaceToWorldSpace(float3 screen_space_position) {
+//	return InvProjectPosition(screen_space_position, g_inv_view_proj);
+//}
+//
+//float3 FFX_DNSR_Reflections_ScreenSpaceToViewSpace(float3 screen_uv_coord) {
+//	return InvProjectPosition(screen_uv_coord, gProjInverse);
+//}
+//
+//float2 FFX_SSSR_GetMipResolution(float2 screen_dimensions, int mip_level) {
+//	return screen_dimensions * pow(0.5, mip_level);
+//}
+//
+//// Requires origin and direction of the ray to be in screen space [0, 1] x [0, 1]
+//float3 FFX_SSSR_HierarchicalRaymarch
+//(
+//	float3 origin,
+//	float3 direction,
+//	bool is_mirror,
+//	float2 screen_size,
+//	int most_detailed_mip,
+//	uint min_traversal_occupancy,
+//	uint max_traversal_intersections,
+//	out bool valid_hit
+//) 
+//{
+//	const float3 inv_direction = direction != 0 ? 1.0 / direction : FFX_SSSR_FLOAT_MAX;
+//
+//	// Start on mip with highest detail.
+//	int current_mip = most_detailed_mip;
+//
+//	// Could recompute these every iteration, but it's faster to hoist them out and update them.
+//	float2 current_mip_resolution = FFX_SSSR_GetMipResolution(screen_size, current_mip);
+//	float2 current_mip_resolution_inv = rcp(current_mip_resolution);
+//
+//	// Offset to the bounding boxes uv space to intersect the ray with the center of the next pixel.
+//	// This means we ever so slightly over shoot into the next region. 
+//	float2 uv_offset = 0.005 * exp2(most_detailed_mip) / screen_size;
+//	uv_offset = direction.xy < 0 ? -uv_offset : uv_offset;
+//
+//	// Offset applied depending on current mip resolution to move the boundary to the left/right upper/lower border depending on ray direction.
+//	float2 floor_offset = direction.xy < 0 ? 0 : 1;
+//
+//	// Initially advance ray to avoid immediate self intersections.
+//	float current_t;
+//	float3 position;
+//	FFX_SSSR_InitialAdvanceRay(origin, direction, inv_direction, current_mip_resolution, current_mip_resolution_inv, floor_offset, uv_offset, position, current_t);
+//
+//	bool exit_due_to_low_occupancy = false;
+//	int i = 0;
+//	while (i < max_traversal_intersections && current_mip >= most_detailed_mip && !exit_due_to_low_occupancy)
+//	{
+//		float2 current_mip_position = current_mip_resolution * position.xy;
+//		float surface_z = FFX_SSSR_LoadDepth(current_mip_position, current_mip);
+//		bool skipped_tile = FFX_SSSR_AdvanceRay(origin, direction, inv_direction, current_mip_position, current_mip_resolution_inv, floor_offset, uv_offset, surface_z, position, current_t);
+//		current_mip += skipped_tile ? 1 : -1;
+//		current_mip_resolution *= skipped_tile ? 0.5 : 2;
+//		current_mip_resolution_inv *= skipped_tile ? 2 : 0.5;
+//		++i;
+//
+//		exit_due_to_low_occupancy = !is_mirror && WaveActiveCountBits(true) <= min_traversal_occupancy;
+//	}
+//
+//	valid_hit = (i <= max_traversal_intersections);
+//
+//	return position;
+//}
+//
+//float FFX_SSSR_ValidateHit(float3 hit, float2 uv, float3 world_space_ray_direction, float2 screen_size, float depth_buffer_thickness)
+//{
+//	// Reject hits outside the view frustum
+//	if (any(hit.xy < 0) || any(hit.xy > 1))
+//	{
+//		return 0;
+//	}
+//
+//	// Reject the hit if we didnt advance the ray significantly to avoid immediate self reflection
+//	float2 manhattan_dist = abs(hit.xy - uv);
+//	if (all(manhattan_dist < (2 / screen_size)))
+//	{
+//		return 0;
+//	}
+//
+//	// Don't lookup radiance from the background.
+//	int2 texel_coords = int2(screen_size * hit.xy);
+//	float surface_z = FFX_SSSR_LoadDepth(texel_coords / 2, 1);
+//	if (surface_z == 1.0)
+//	{
+//		return 0;
+//	}
+//
+//	// We check if we hit the surface from the back, these should be rejected.
+//	float3 hit_normal = FFX_SSSR_LoadNormal(texel_coords);
+//	if (dot(hit_normal, world_space_ray_direction) > 0)
+//	{
+//		return 0;
+//	}
+//
+//	float3 view_space_surface = FFX_SSSR_ScreenSpaceToViewSpace(float3(hit.xy, surface_z));
+//	float3 view_space_hit = FFX_SSSR_ScreenSpaceToViewSpace(hit);
+//	float distance = length(view_space_surface - view_space_hit);
+//
+//	// Fade out hits near the screen borders
+//	float2 fov = 0.05 * float2(screen_size.y / screen_size.x, 1);
+//	float2 border = smoothstep(0, fov, hit.xy) * (1 - smoothstep(1 - fov, 1, hit.xy));
+//	float vignette = border.x * border.y;
+//
+//	// We accept all hits that are within a reasonable minimum distance below the surface.
+//	// Add constant in linear space to avoid growing of the reflections toward the reflected objects.
+//	float confidence = 1 - smoothstep(0, depth_buffer_thickness, distance);
+//	confidence *= confidence;
+//
+//	return vignette * confidence;
+//}
+//
+//float4 main(VertexOut pin) : sv_target
+//{
+//	float2 PixelUV = pin.TexCoord;
+//	float2 NDCPos = float2(+2.f, -2.f) * PixelUV + float2(-1.f, +1.f);
+//
+//	// Prerequisites
+//	float4 NormalDepth = gNormalDepthMap.SampleLevel(gNormalDepthSamplerState, pin.TexCoord, 0);
+//
+//	float  DeviceZ = NormalDepth.w;
+//	float3 WorldPosition = GetFullWorldPosition(float4(NDCPos, DeviceZ, 1));
+//	float3 CameraVector = normalize(WorldPosition - gCameraPosition);
+//	float3 WorldNormal = mul(gViewInverse, float4(NormalDepth.xyz, 0)).xyz;
+//
+//	// SSSR
+//	{
+//		uint g_most_detailed_mip = 0;
+//
+//		int2 coords = pin.PositionH.xy;
+//
+//		uint2 screen_size;
+//		gNormalDepthMap.GetDimensions(screen_size.x, screen_size.y);
+//
+//		float2 uv = (coords + 0.5) / screen_size;
+//
+//		float3 world_space_normal = WorldNormal;
+//		float roughness = 0;
+//		bool is_mirror = false;
+//
+//		int most_detailed_mip = is_mirror ? 0 : g_most_detailed_mip;
+//		float2 mip_resolution = FFX_SSSR_GetMipResolution(screen_size, most_detailed_mip);
+//		float z = gHierarchicalDepthBuffer.SampleLevel(gHierarchicalDepthBufferSamplerState, uv * mip_resolution, most_detailed_mip).r;
+//
+//		float3 screen_uv_space_ray_origin = float3(uv, z);
+//		float3 view_space_ray = FFX_DNSR_Reflections_ScreenSpaceToViewSpace(screen_uv_space_ray_origin);
+//		float3 view_space_ray_direction = normalize(view_space_ray);
+//
+//		float3 view_space_surface_normal = mul(float4(normalize(world_space_normal), 0), g_view).xyz;
+//		float3 view_space_reflected_direction = SampleReflectionVector(view_space_ray_direction, view_space_surface_normal, roughness, coords);
+//		float3 screen_space_ray_direction = ProjectDirection(view_space_ray, view_space_reflected_direction, screen_uv_space_ray_origin, g_proj);
+//
+//		bool valid_hit = false;
+//		float3 hit = FFX_SSSR_HierarchicalRaymarch(screen_uv_space_ray_origin, screen_space_ray_direction, is_mirror, screen_size, most_detailed_mip, g_min_traversal_occupancy, g_max_traversal_intersections, valid_hit);
+//
+//		float3 world_space_origin = ScreenSpaceToWorldSpace(screen_uv_space_ray_origin);
+//		float3 world_space_hit = ScreenSpaceToWorldSpace(hit);
+//		float3 world_space_ray = world_space_hit - world_space_origin.xyz;
+//
+//		float confidence = valid_hit ? FFX_SSSR_ValidateHit(hit, uv, world_space_ray, screen_size, g_depth_buffer_thickness) : 0;
+//		float world_ray_length = length(world_space_ray);
+//
+//		float3 reflection_radiance = 0;
+//		if (confidence > 0) {
+//			// Found an intersection with the depth buffer -> We can lookup the color from lit scene.
+//			reflection_radiance = g_lit_scene.Load(int3(screen_size * hit.xy, 0)).xyz;
+//		}
+//	}
+//
+//	// ScreenSpacePos --> (screencoord.xy, device_z)
+//	float4 ScreenSpacePos = float4(PixelUV, DeviceZ, 1.f);
+//
+//	// Compute world space reflection vector
+//	float3 ReflectionVector = reflect(CameraVector, WorldNormal);
+//
+//	float CameraFacingReflectionAttenuation = 1 - smoothstep(0.25, 0.5, dot(-CameraVector, ReflectionVector));
+//
+//	// Reject if the reflection vector is pointing back at the viewer.
+//	if (CameraFacingReflectionAttenuation <= 0)
+//	{
+//		return float4(0, 0, 0, 0);
+//	}
+//
+//	// Compute second sreen space point so that we can get the SS reflection vector
+//	float4 PointAlongReflectionVec = float4(10.f * ReflectionVector + WorldPosition, 1.f);
+//	float4 ScreenSpaceReflectionPoint = mul(gViewProj, PointAlongReflectionVec);
+//	ScreenSpaceReflectionPoint /= ScreenSpaceReflectionPoint.w;
+//	ScreenSpaceReflectionPoint.xy = ScreenSpaceReflectionPoint.xy * float2(+0.5, -0.5) + float2(0.5, 0.5);
+//
+//	// Compute the sreen space reflection vector as the difference of the two screen space points
+//	float3 ScreenSpaceReflectionVec = normalize(ScreenSpaceReflectionPoint.xyz - ScreenSpacePos.xyz);
+//
+//	float3 OutReflectionColor;
+//	//float a = GetReflection(ScreenSpaceReflectionVec, ScreenSpacePos.xyz, OutReflectionColor);
+//	//float a = GetReflectionHiZ(ScreenSpaceReflectionVec, ScreenSpacePos.xyz, OutReflectionColor);
+//
+//	uint iterations = 0;
+//	float a = 1;
+//	OutReflectionColor = hi_z_trace(ScreenSpacePos.xyz, ScreenSpaceReflectionVec, iterations);
+//
+//	float3 ReflectionNormal = WorldNormal;
+//	float DirectionBasedAttenuation = smoothstep(-1.7f, 0, dot(ReflectionNormal, -ReflectionVector));
+//	a *= DirectionBasedAttenuation;
+//
+//	return float4(OutReflectionColor, a);
+//}

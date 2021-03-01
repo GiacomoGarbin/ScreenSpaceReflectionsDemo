@@ -7,6 +7,8 @@
 #include "SSR.h"
 #include "SSPR.h"
 
+#include "SSSR.h"
+
 class TestApp : public D3DApp
 {
 public:
@@ -107,6 +109,8 @@ public:
 	SSR mSSR;
 	SSPR mSSPR;
 	bool mEnableSSPR;
+
+	SSSR mSSSR;
 
 	//void DrawSceneToReflectionsMap();
 
@@ -768,6 +772,9 @@ bool TestApp::Init()
 	mSSPR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
 	mSSPR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
 
+	mSSSR.init(mDevice, mMainWindowWidth, mMainWindowHeight);
+	mSSSR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
+
 	{
 		std::wstring path = L"DebugQuadPS.hlsl";
 
@@ -863,6 +870,8 @@ void TestApp::OnResize(GLFWwindow* window, int width, int height)
 
 	mSSR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
 	mSSPR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
+
+	mSSSR.OnResize(mDevice, mMainWindowWidth, mMainWindowHeight);
 
 	// scene albedo RTV and SRV
 	{
@@ -1351,7 +1360,7 @@ void TestApp::DrawScene()
 		// hierarchical depth buffer
 		mSSR.ComputeHierarchicalDepthBuffer(mDevice, mContext, mSSAO.GetNormalDepthSRV());
 
-		mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
+		//mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
 		//mSSPR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
 	}
 
@@ -1673,6 +1682,8 @@ void TestApp::DrawScene()
 
 		// draw sky
 		DrawGameObject(&mSky);
+
+		//mContext->OMSetRenderTargets(0, nullptr, nullptr);
 	};
 
 	//mGrid.mPixelShader = nullptr;
@@ -1682,6 +1693,10 @@ void TestApp::DrawScene()
 
 	// reset depth stencil state
 	mContext->OMSetDepthStencilState(nullptr, 0);
+
+	{
+		mSSSR.draw(mContext, mCamera, mSceneAlbedoSRV, mSSR.mHierarchicalDepthBufferSRV, mSSAO.GetNormalDepthSRV());
+	}
 	
 	//{
 	//	mContext->OMSetRenderTargets(1, &mRenderTargetView, nullptr);
@@ -1695,7 +1710,8 @@ void TestApp::DrawScene()
 
 		// bind reflections map and scene albedo map SRVs
 		ID3D11ShaderResourceView* const SRVs[2] = {
-			mEnableSSPR ? mSSPR.mReflectionsMapSRV : mSSR.mReflectionsMapSRV,
+			//mEnableSSPR ? mSSPR.mReflectionsMapSRV : mSSR.mReflectionsMapSRV,
+			mSSSR.mSRV,
 			mSceneAlbedoSRV
 		};
 		mContext->PSSetShaderResources(5, 2, SRVs);
@@ -1741,14 +1757,15 @@ void TestApp::DrawScene()
 
 	if (IsKeyPressed(GLFW_KEY_5))
 	{
-		if (mEnableSSPR)
-		{
-			mSSPR.mDebugQuad.Draw(mContext, mSSPR.mReflectionsMapSRV);
-		}
-		else
-		{
-			mSSR.mDebugQuad.Draw(mContext, mSSR.mReflectionsMapSRV);
-		}
+		//if (mEnableSSPR)
+		//{
+		//	mSSPR.mDebugQuad.Draw(mContext, mSSPR.mReflectionsMapSRV);
+		//}
+		//else
+		//{
+		//	mSSR.mDebugQuad.Draw(mContext, mSSR.mReflectionsMapSRV);
+		//}
+		mSSSR.mDebugQuad.Draw(mContext, mSSSR.mSRV);
 	}
 
 	mSwapChain->Present(0, 0);
