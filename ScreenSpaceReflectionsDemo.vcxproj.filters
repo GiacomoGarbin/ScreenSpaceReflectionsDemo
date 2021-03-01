@@ -29,16 +29,30 @@
     <FxCompile Include="SSRCopyDepthBufferCS.hlsl" />
     <FxCompile Include="SSRComputeHierarchicalDepthBufferPS.hlsl" />
     <FxCompile Include="SSRComputeHierarchicalDepthBufferVS.hlsl" />
+    <FxCompile Include="SSSR_CS.hlsl">
+      <Filter>SSSR</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="SSPR.cpp" />
     <ClCompile Include="SSR.cpp" />
     <ClCompile Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.cpp" />
+    <ClCompile Include="SSSR.cpp">
+      <Filter>SSSR</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="SSPR.h" />
     <ClInclude Include="SSR.h" />
     <ClInclude Include="..\3D Game Programming with DirectX 11\D3DApp\D3DApp.h" />
+    <ClInclude Include="SSSR.h">
+      <Filter>SSSR</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="SSSR">
+      <UniqueIdentifier>{075a0f51-3cb0-4244-bf26-6eb9bd15b3c8}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

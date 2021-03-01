@@ -415,6 +415,11 @@ void SSR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject
 			XMStoreFloat4x4(&buffer.ViewProjInverse, XMMatrixInverse(&det, ViewProj));
 		}
 
+		{
+			XMVECTOR det = XMMatrixDeterminant(camera.mProj);
+			XMStoreFloat4x4(&buffer.ProjInverse, XMMatrixInverse(&det, camera.mProj));
+		}
+
 		buffer.CameraPosition = camera.mPosition;
 
 		context->UpdateSubresource(mConstantBuffer, 0, 0, &buffer, 0, 0);
