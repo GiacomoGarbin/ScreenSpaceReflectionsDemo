@@ -79,6 +79,9 @@ void SSSR::OnResize(ID3D11Device* device, UINT width, UINT height)
 
 void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* LightPass, ID3D11ShaderResourceView* DepthBufferHierarchy, ID3D11ShaderResourceView* normals)
 {
+	const FLOAT values[] = { 0, 0, 0, 0 };
+	context->ClearUnorderedAccessViewFloat(mUAV, values);
+
 	// bind compute shader
 	context->CSSetShader(mComputeShader, nullptr, 0);
 

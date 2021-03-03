@@ -925,6 +925,44 @@ void TestApp::UpdateScene(float dt)
 		mCamera.strafe(+10 * dt);
 	}
 
+	if (IsKeyPressed(GLFW_KEY_Q))
+	{
+		mCamera.rotate(-XM_PI/180);
+	}
+
+	if (IsKeyPressed(GLFW_KEY_E))
+	{
+		mCamera.rotate(+XM_PI/180);
+	}
+
+	if (IsKeyPressed(GLFW_KEY_Z))
+	{
+		// mPosition += delta*mUp
+		XMVECTOR d = XMVectorReplicate(+0.1f);
+		XMVECTOR u = XMLoadFloat3(&mCamera.mUp);
+		XMVECTOR p = XMLoadFloat3(&mCamera.mPosition);
+		XMStoreFloat3(&mCamera.mPosition, XMVectorMultiplyAdd(d, u, p));
+	}
+
+	if (IsKeyPressed(GLFW_KEY_X))
+	{
+		// mPosition += delta*mUp
+		XMVECTOR d = XMVectorReplicate(-0.1f);
+		XMVECTOR u = XMLoadFloat3(&mCamera.mUp);
+		XMVECTOR p = XMLoadFloat3(&mCamera.mPosition);
+		XMStoreFloat3(&mCamera.mPosition, XMVectorMultiplyAdd(d, u, p));
+	}
+
+	if (IsKeyPressed(GLFW_KEY_C))
+	{
+		mCamera.pitch(-XM_PI / 180);
+	}
+
+	if (IsKeyPressed(GLFW_KEY_V))
+	{
+		mCamera.pitch(+XM_PI / 180);
+	}
+
 	//// animate lights
 	//{
 	//	mLightAngle += 0.1f * dt;
