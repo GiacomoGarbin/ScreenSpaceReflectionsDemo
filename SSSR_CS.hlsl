@@ -2,20 +2,26 @@ Texture2D<float4>   g_lit_scene              : register(t0);
 Texture2D<float>    g_depth_buffer_hierarchy : register(t1);
 Texture2D<float4>   g_normal                 : register(t2);
 
+StructuredBuffer<uint> g_sobol_buffer             : register(t5);
+StructuredBuffer<uint> g_ranking_tile_buffer      : register(t6);
+StructuredBuffer<uint> g_scrambling_tile_buffer   : register(t7);
+
 RWTexture2D<float4> gOutputTexture           : register(u0);
 
-#define FFX_SSSR_FLOAT_MAX                   3.402823466e+38
-#define M_PI                                 3.14159265358979323846
+#define FFX_SSSR_FLOAT_MAX                 3.402823466e+38
+#define M_PI                               3.14159265358979323846
+#define GOLDEN_RATIO                       1.61803398875f
 
 cbuffer ConstantBuffer : register(b0)
 {
     float4x4 g_proj;
     float4x4 g_inv_proj;
     float4x4 g_inv_view_proj;
+
+    uint g_frame_index;
+
+    float3 padding;
 };
-
-
-
 
 // Transforms origin to uv space
 // Mat must be able to transform origin from its current space into clip space.
@@ -57,18 +63,44 @@ float3x3 CreateTBN(float3 N)
     return transpose(TBN);
 }
 
+// Blue Noise Sampler by Eric Heitz. Returns a value in the range [0, 1].
+float SampleRandomNumber(uint pixel_i, uint pixel_j, uint sample_index, uint sample_dimension)
+{
+    // Wrap arguments
+    pixel_i = pixel_i & 127u;
+    pixel_j = pixel_j & 127u;
+    sample_index = sample_index & 255u;
+    sample_dimension = sample_dimension & 255u;
+
+#ifndef SPP
+#define SPP 1
+#endif
+
+#if SPP == 1
+    const uint ranked_sample_index = sample_index ^ 0;
+#else
+    // xor index based on optimized ranking
+    const uint ranked_sample_index = sample_index ^ g_ranking_tile_buffer[sample_dimension + (pixel_i + pixel_j * 128u) * 8u];
+#endif
+
+    // Fetch value in sequence
+    uint value = g_sobol_buffer[sample_dimension + ranked_sample_index * 256u];
+
+    // If the dimension is optimized, xor sequence value based on optimized scrambling
+    value = value ^ g_scrambling_tile_buffer[(sample_dimension % 8u) + (pixel_i + pixel_j * 128u) * 8u];
+
+    // Convert to float and return
+    return (value + 0.5f) / 256.0f;
+}
+
 float2 SampleRandomVector2D(uint2 pixel)
 {
-    //float2 u = float2
-    //    (
-    //        fmod(SampleRandomNumber(pixel.x, pixel.y, 0, 0u) + (g_frame_index & 0xFFu) * GOLDEN_RATIO, 1.0f),
-    //        fmod(SampleRandomNumber(pixel.x, pixel.y, 0, 1u) + (g_frame_index & 0xFFu) * GOLDEN_RATIO, 1.0f)
-    //        );
-
-    uint2 screen_size;
-    gOutputTexture.GetDimensions(screen_size.x, screen_size.y);
-    float2 u = pixel / screen_size;
-    return 0;
+    float2 u = float2
+    (
+        fmod(SampleRandomNumber(pixel.x, pixel.y, 0, 0u) + (g_frame_index & 0xFFu) * GOLDEN_RATIO, 1.0f),
+        fmod(SampleRandomNumber(pixel.x, pixel.y, 0, 1u) + (g_frame_index & 0xFFu) * GOLDEN_RATIO, 1.0f)
+    );
+    return u;
 }
 
 float3 SampleGGXVNDF(float3 Ve, float alpha_x, float alpha_y, float U1, float U2)
@@ -304,13 +336,15 @@ float3 FFX_SSSR_HierarchicalRaymarch
 float FFX_SSSR_ValidateHit(float3 hit, float2 uv, float3 world_space_ray_direction, float2 screen_size, float depth_buffer_thickness)
 {
     // Reject hits outside the view frustum
-    if (any(hit.xy < 0) || any(hit.xy > 1)) {
+    if (any(hit.xy < 0) || any(hit.xy > 1))
+    {
         return 0;
     }
 
     // Reject the hit if we didnt advance the ray significantly to avoid immediate self reflection
     float2 manhattan_dist = abs(hit.xy - uv);
-    if (all(manhattan_dist < (2 / screen_size))) {
+    if (all(manhattan_dist < (2 / screen_size)))
+    {
         return 0;
     }
 
@@ -318,16 +352,18 @@ float FFX_SSSR_ValidateHit(float3 hit, float2 uv, float3 world_space_ray_directi
     int2 texel_coords = int2(screen_size * hit.xy);
     float surface_z = FFX_SSSR_LoadDepth(texel_coords / 2, 1);
 #ifdef FFX_SSSR_INVERTED_DEPTH_RANGE
-    if (surface_z == 0.0) {
+    if (surface_z == 0.0)
 #else
-    if (surface_z == 1.0) {
+    if (surface_z == 1.0)
 #endif
+    {
         return 0;
     }
 
     // We check if we hit the surface from the back, these should be rejected.
     float3 hit_normal = FFX_SSSR_LoadNormal(texel_coords);
-    if (dot(hit_normal, world_space_ray_direction) > 0) {
+    if (dot(hit_normal, world_space_ray_direction) > 0)
+    {
         return 0;
     }
 
@@ -346,7 +382,7 @@ float FFX_SSSR_ValidateHit(float3 hit, float2 uv, float3 world_space_ray_directi
     confidence *= confidence;
 
     return vignette * confidence;
-    }
+}
 
 [numthreads(8, 8, 1)]
 void main(uint3 GroupThreadID : SV_GroupThreadID, uint3 DispatchThreadID : SV_DispatchThreadID)
@@ -386,13 +422,21 @@ void main(uint3 GroupThreadID : SV_GroupThreadID, uint3 DispatchThreadID : SV_Di
     float3 world_space_ray = world_space_hit - world_space_origin.xyz;
     float confidence = valid_hit ? FFX_SSSR_ValidateHit(hit, uv, world_space_ray, screen_size, g_depth_buffer_thickness) : 0;
 
-    float3 reflection_radiance = confidence;
-    //if (confidence > 0) {
+    float3 reflection_radiance = 0;
+    if (confidence > 0)
+    {
         // Found an intersection with the depth buffer -> We can lookup the color from lit scene.
         reflection_radiance = g_lit_scene.Load(int3(screen_size * hit.xy, 0)).xyz;
-    //}
+    }
 
     gOutputTexture[DispatchThreadID.xy] = float4(hit.xy, 0, confidence);
+
+    //float2 u = SampleRandomVector2D(DispatchThreadID.xy);
+    //gOutputTexture[DispatchThreadID.xy] = float4(u, 0, 1);
+
+    //uint value = g_sobol_buffer[0];
+    //gOutputTexture[DispatchThreadID.xy] = float4(value, 0, 0, 1);
+
     //gOutputTexture[DispatchThreadID.xy] = float4(FFX_SSSR_LoadNormal(coords), 1);
     //gOutputTexture[DispatchThreadID.xy] = float4(z, z, z, 1);
     //gOutputTexture[DispatchThreadID.xy] = float4(screen_uv_space_ray_origin + screen_space_ray_direction, 1);

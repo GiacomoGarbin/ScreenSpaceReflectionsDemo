@@ -1400,6 +1400,8 @@ void TestApp::DrawScene()
 
 		//mSSR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
 		//mSSPR.ComputeReflectionsMap(mContext, mCamera, mSSAO.GetNormalDepthSRV());
+
+		mSSSR.draw(mContext, mCamera, mSceneAlbedoSRV, mSSR.mHierarchicalDepthBufferSRV, mSSAO.GetNormalDepthSRV(), mFrameIndex);
 	}
 
 	// restore back and depth buffers, and viewport
@@ -1731,10 +1733,6 @@ void TestApp::DrawScene()
 
 	// reset depth stencil state
 	mContext->OMSetDepthStencilState(nullptr, 0);
-
-	{
-		mSSSR.draw(mContext, mCamera, mSceneAlbedoSRV, mSSR.mHierarchicalDepthBufferSRV, mSSAO.GetNormalDepthSRV());
-	}
 	
 	//{
 	//	mContext->OMSetRenderTargets(1, &mRenderTargetView, nullptr);

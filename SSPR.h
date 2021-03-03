@@ -44,4 +44,4 @@ public:
 	void ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV);
 };
 
-#endif SSPR_H
+#endif // SSPR_H

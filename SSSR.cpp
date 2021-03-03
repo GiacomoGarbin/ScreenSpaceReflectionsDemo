@@ -1,10 +1,19 @@
 #include "SSSR.h"
+#include "BlueNoise.h"
 
 SSSR::SSSR() :
 	mComputeShader(nullptr),
 	mUAV(nullptr),
 	mSRV(nullptr),
-	mConstantBuffer(nullptr)
+	mConstantBuffer(nullptr),
+
+	mSobolBuffer(nullptr),
+	mRankingTileBuffer(nullptr),
+	mScramblingTileBuffer(nullptr),
+
+	mSobolSRV(nullptr),
+	mRankingTileSRV(nullptr),
+	mScramblingTileSRV(nullptr)
 {}
 
 SSSR::~SSSR()
@@ -13,6 +22,14 @@ SSSR::~SSSR()
 	SafeRelease(mUAV);
 	SafeRelease(mSRV);
 	SafeRelease(mConstantBuffer);
+
+	SafeRelease(mSobolBuffer);
+	SafeRelease(mRankingTileBuffer);
+	SafeRelease(mScramblingTileBuffer);
+
+	SafeRelease(mSobolSRV);
+	SafeRelease(mRankingTileSRV);
+	SafeRelease(mScramblingTileSRV);
 }
 
 void SSSR::init(ID3D11Device* device, UINT width, UINT height)
@@ -39,6 +56,48 @@ void SSSR::init(ID3D11Device* device, UINT width, UINT height)
 		desc.StructureByteStride = 0;
 
 		HR(device->CreateBuffer(&desc, nullptr, &mConstantBuffer));
+	}
+
+	// blue noise
+	{
+		auto CreateStructuredBufferSRV = [device](const std::vector<UINT>& elements, ID3D11Buffer*& buffer, ID3D11ShaderResourceView*& srv)
+		{
+			// buffer
+			{
+				D3D11_BUFFER_DESC desc;
+				desc.Usage = D3D11_USAGE_DEFAULT;
+				desc.ByteWidth = sizeof(UINT) * elements.size();
+				desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+				desc.CPUAccessFlags = 0;
+				desc.StructureByteStride = sizeof(UINT);
+				desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+
+				D3D11_SUBRESOURCE_DATA data;
+				data.pSysMem = elements.data();
+				data.SysMemPitch = 0;
+				data.SysMemSlicePitch = 0;
+
+				HR(device->CreateBuffer(&desc, &data, &buffer));
+			}
+
+			// SRV
+			{
+				D3D11_SHADER_RESOURCE_VIEW_DESC desc;
+				desc.Format = DXGI_FORMAT_UNKNOWN;
+				desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+				desc.Buffer.FirstElement = 0;
+				desc.Buffer.NumElements = elements.size();
+
+				HR(device->CreateShaderResourceView(buffer, &desc, &srv));
+			}
+		};
+
+		// sobol buffer
+		CreateStructuredBufferSRV(sobol_256spp_256d, mSobolBuffer, mSobolSRV);
+		// scrambling tile buffer
+		CreateStructuredBufferSRV(scramblingTile, mScramblingTileBuffer, mScramblingTileSRV);
+		// ranking tile buffer
+		CreateStructuredBufferSRV(rankingTile, mRankingTileBuffer, mRankingTileSRV);
 	}
 }
 
@@ -77,7 +136,7 @@ void SSSR::OnResize(ID3D11Device* device, UINT width, UINT height)
 	mDebugQuad.OnResize(mWidth, mHeight, (float)mWidth / (float)mHeight);
 }
 
-void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* LightPass, ID3D11ShaderResourceView* DepthBufferHierarchy, ID3D11ShaderResourceView* normals)
+void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* LightPass, ID3D11ShaderResourceView* DepthBufferHierarchy, ID3D11ShaderResourceView* normals, UINT FrameIndex)
 {
 	const FLOAT values[] = { 0, 0, 0, 0 };
 	context->ClearUnorderedAccessViewFloat(mUAV, values);
@@ -106,6 +165,8 @@ void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11
 			XMStoreFloat4x4(&buffer.ViewProjInverse, XMMatrixInverse(&det, ViewProj));
 		}
 
+		buffer.FrameIndex = FrameIndex;
+
 		context->UpdateSubresource(mConstantBuffer, 0, 0, &buffer, 0, 0);
 
 		context->CSSetConstantBuffers(0, 1, &mConstantBuffer);
@@ -116,6 +177,12 @@ void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11
 		context->CSSetShaderResources(0, 1, &LightPass);
 		context->CSSetShaderResources(1, 1, &DepthBufferHierarchy);
 		context->CSSetShaderResources(2, 1, &normals);
+
+		//context->UpdateSubresource(mSobolBuffer, 0, nullptr, sobol_256spp_256d.data(), 0, 0);
+
+		context->CSSetShaderResources(5, 1, &mSobolSRV);
+		context->CSSetShaderResources(6, 1, &mScramblingTileSRV);
+		context->CSSetShaderResources(7, 1, &mRankingTileSRV);
 	}
 
 	// bind UAVs
@@ -138,8 +205,8 @@ void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11
 
 	// unbind SRVs
 	{
-		ID3D11ShaderResourceView* const NullSRVs[3] = { nullptr, nullptr, nullptr };
-		context->CSSetShaderResources(0, 3, NullSRVs);
+		ID3D11ShaderResourceView* const NullSRVs[6] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+		context->CSSetShaderResources(0, 6, NullSRVs);
 	}
 
 	// unbind UAVs
