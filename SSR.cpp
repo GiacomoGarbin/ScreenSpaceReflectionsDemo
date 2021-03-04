@@ -269,42 +269,6 @@ void SSR::Init(ID3D11Device* device, UINT width, UINT height, float FieldOfViewY
 			//mContext->DSSetSamplers(0, 1, &mSamplerState);
 			//mContext->PSSetSamplers(0, 1, &mSamplerState);
 		}
-
-		// SRVs and UAVs
-		{
-			mMipLevels = std::ceil(std::log2(std::min(mWidth, mHeight)));
-
-			D3D11_TEXTURE2D_DESC desc;
-			desc.Width = mWidth;
-			desc.Height = mHeight;
-			desc.MipLevels = mMipLevels; // <- to be computed
-			desc.ArraySize = 1;
-			desc.Format = DXGI_FORMAT_R32_FLOAT;
-			desc.SampleDesc.Count = 1;
-			desc.SampleDesc.Quality = 0;
-			desc.Usage = D3D11_USAGE_DEFAULT;
-			desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-			desc.CPUAccessFlags = 0;
-			desc.MiscFlags = 0;
-
-			ID3D11Texture2D* texture = nullptr;
-			HR(device->CreateTexture2D(&desc, 0, &texture));
-
-			//mHierarchicalDepthBufferRTV.resize(mMipLevels);
-			//for (UINT i = 0; i < mHierarchicalDepthBufferRTV.size(); ++i)
-			//{
-			//	D3D11_RENDER_TARGET_VIEW_DESC RenderTargetDesc;
-			//	RenderTargetDesc.Format = desc.Format;
-			//	RenderTargetDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-			//	RenderTargetDesc.Texture2D.MipSlice = i;
-
-			//	HR(device->CreateRenderTargetView(texture, &RenderTargetDesc, &mHierarchicalDepthBufferRTV[i]));
-			//}
-
-			HR(device->CreateShaderResourceView(texture, nullptr, &mHierarchicalDepthBufferSRV));
-
-			SafeRelease(texture);
-		}
 	}
 }
 
@@ -363,6 +327,31 @@ void SSR::OnResize(ID3D11Device* device, UINT width, UINT height, float FieldOfV
 	}
 
 	mDebugQuad.OnResize(mWidth, mHeight, (float)mWidth / (float)mHeight);
+
+	// hierarchical depth buffer SRV
+	{
+		mMipLevels = std::ceil(std::log2(std::min(mWidth, mHeight)));
+
+		D3D11_TEXTURE2D_DESC desc;
+		desc.Width = mWidth;
+		desc.Height = mHeight;
+		desc.MipLevels = mMipLevels;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R32_FLOAT;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+
+		ID3D11Texture2D* texture = nullptr;
+		HR(device->CreateTexture2D(&desc, 0, &texture));
+
+		HR(device->CreateShaderResourceView(texture, nullptr, &mHierarchicalDepthBufferSRV));
+
+		SafeRelease(texture);
+	}
 }
 
 void SSR::ComputeReflectionsMap(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11ShaderResourceView* NormalDepthSRV)

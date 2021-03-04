@@ -14,6 +14,7 @@ RWTexture2D<float4> gOutputTexture           : register(u0);
 
 cbuffer ConstantBuffer : register(b0)
 {
+    float4x4 g_inv_view;
     float4x4 g_proj;
     float4x4 g_inv_proj;
     float4x4 g_inv_view_proj;
@@ -361,8 +362,9 @@ float FFX_SSSR_ValidateHit(float3 hit, float2 uv, float3 world_space_ray_directi
     }
 
     // We check if we hit the surface from the back, these should be rejected.
-    float3 hit_normal = FFX_SSSR_LoadNormal(texel_coords);
-    if (dot(hit_normal, world_space_ray_direction) > 0)
+    float3 view_space_hit_normal  = FFX_SSSR_LoadNormal(texel_coords);
+    float3 world_space_hit_normal = mul(g_inv_view, float4(normalize(view_space_hit_normal), 0)).xyz;
+    if (dot(world_space_hit_normal, world_space_ray_direction) > 0)
     {
         return 0;
     }
@@ -398,7 +400,8 @@ void main(uint3 GroupThreadID : SV_GroupThreadID, uint3 DispatchThreadID : SV_Di
     uint2 coords = DispatchThreadID.xy;
     float2 uv = (coords + 0.5) / screen_size;
 
-    float3 world_space_normal = FFX_SSSR_LoadNormal(coords);
+    float3 view_space_surface_normal = FFX_SSSR_LoadNormal(coords);
+    float3 world_space_normal = mul(g_inv_view, float4(normalize(view_space_surface_normal), 0)).xyz;
     float roughness = 0; // g_roughness.Load(int3(coords, 0));
     bool is_mirror = IsMirrorReflection(roughness);
 
@@ -410,7 +413,6 @@ void main(uint3 GroupThreadID : SV_GroupThreadID, uint3 DispatchThreadID : SV_Di
     float3 view_space_ray = FFX_DNSR_Reflections_ScreenSpaceToViewSpace(screen_uv_space_ray_origin);
     float3 view_space_ray_direction = normalize(view_space_ray);
 
-    float3 view_space_surface_normal = world_space_normal; // mul(float4(normalize(world_space_normal), 0), g_view).xyz;
     float3 view_space_reflected_direction = SampleReflectionVector(view_space_ray_direction, view_space_surface_normal, roughness, coords);
     float3 screen_space_ray_direction = ProjectDirection(view_space_ray, view_space_reflected_direction, screen_uv_space_ray_origin, g_proj);
 

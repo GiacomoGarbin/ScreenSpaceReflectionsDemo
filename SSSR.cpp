@@ -150,6 +150,11 @@ void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11
 
 		XMMATRIX view = XMLoadFloat4x4(&camera.mView);
 
+		{
+			XMVECTOR det = XMMatrixDeterminant(view);
+			XMStoreFloat4x4(&buffer.ViewInverse, XMMatrixInverse(&det, view));
+		}
+
 		XMMATRIX proj = camera.mProj;
 		XMStoreFloat4x4(&buffer.proj, proj);
 

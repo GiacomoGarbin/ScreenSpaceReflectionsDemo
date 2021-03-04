@@ -374,12 +374,14 @@ float4 main(VertexOut pin) : SV_TARGET
 			gSceneAlbedoTexture.GetDimensions(TexSize.x, TexSize.y);
 			float2 TexCoord = pin.PositionH.xy / TexSize;
 
-			float4 RayPayload = gReflectionsTexture.Sample(gLinearSamplerState, TexCoord);
+			//float4 RayPayload = gReflectionsTexture.Sample(gLinearSamplerState, TexCoord);
+			float4 RayPayload = gReflectionsTexture.Load(int3(pin.PositionH.xy, 0));
 			//float4 ReflectCol = RayPayload.z ? gSceneAlbedoTexture.Sample(gLinearSamplerState, RayPayload.xy) : 0;
-			float4 ReflectCol = gSceneAlbedoTexture.Sample(gLinearSamplerState, RayPayload.xy);
+			//float4 ReflectCol = gSceneAlbedoTexture.Sample(gLinearSamplerState, RayPayload.xy);
+			float4 ReflectCol = gSceneAlbedoTexture.Load(int3(RayPayload.xy*TexSize, 0));
 			//ReflectCol.a = 1;
 			//color += gMaterial.reflect * ReflectCol;
-			color += gMaterial.reflect * float4(lerp(float3(0,0,0), ReflectCol.rgb, RayPayload.w), 1);
+			color += gMaterial.reflect * float4(lerp(float3(0, 0, 0), ReflectCol.rgb, RayPayload.w), 1);
 			//color = ReflectCol;
 
 			//// https://github.com/lettier/3d-game-shaders-for-beginners/blob/master/demonstration/shaders/fragment/reflection-color.frag
