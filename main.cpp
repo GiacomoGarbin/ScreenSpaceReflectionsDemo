@@ -770,7 +770,7 @@ bool TestApp::Init()
 	mSSR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
 
 	mSSPR.Init(mDevice, mMainWindowWidth, mMainWindowHeight, mCamera.mFovAngleY, mCamera.mNearZ, mCamera.mFarZ);
-	mSSPR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
+	mSSPR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopLeft, AspectRatio());
 
 	mSSSR.init(mDevice, mMainWindowWidth, mMainWindowHeight);
 	mSSSR.mDebugQuad.Init(mDevice, mMainWindowWidth, mMainWindowHeight, AspectRatio(), DebugQuad::WindowCorner::TopRight, AspectRatio());
@@ -927,18 +927,18 @@ void TestApp::UpdateScene(float dt)
 
 	if (IsKeyPressed(GLFW_KEY_Q))
 	{
-		mCamera.rotate(-XM_PI/180);
+		mCamera.rotate(-XM_PI/1800);
 	}
 
 	if (IsKeyPressed(GLFW_KEY_E))
 	{
-		mCamera.rotate(+XM_PI/180);
+		mCamera.rotate(+XM_PI/1800);
 	}
 
 	if (IsKeyPressed(GLFW_KEY_Z))
 	{
 		// mPosition += delta*mUp
-		XMVECTOR d = XMVectorReplicate(+0.1f);
+		XMVECTOR d = XMVectorReplicate(+0.01f);
 		XMVECTOR u = XMLoadFloat3(&mCamera.mUp);
 		XMVECTOR p = XMLoadFloat3(&mCamera.mPosition);
 		XMStoreFloat3(&mCamera.mPosition, XMVectorMultiplyAdd(d, u, p));
@@ -947,7 +947,7 @@ void TestApp::UpdateScene(float dt)
 	if (IsKeyPressed(GLFW_KEY_X))
 	{
 		// mPosition += delta*mUp
-		XMVECTOR d = XMVectorReplicate(-0.1f);
+		XMVECTOR d = XMVectorReplicate(-0.01f);
 		XMVECTOR u = XMLoadFloat3(&mCamera.mUp);
 		XMVECTOR p = XMLoadFloat3(&mCamera.mPosition);
 		XMStoreFloat3(&mCamera.mPosition, XMVectorMultiplyAdd(d, u, p));
@@ -955,12 +955,18 @@ void TestApp::UpdateScene(float dt)
 
 	if (IsKeyPressed(GLFW_KEY_C))
 	{
-		mCamera.pitch(-XM_PI / 180);
+		mCamera.pitch(-XM_PI / 1800);
 	}
 
 	if (IsKeyPressed(GLFW_KEY_V))
 	{
-		mCamera.pitch(+XM_PI / 180);
+		mCamera.pitch(+XM_PI / 1800);
+	}
+
+
+	if (IsKeyPressed(GLFW_KEY_R))
+	{
+		mCamera.mLook = XMFLOAT3(0, 0, 1);
 	}
 
 	//// animate lights
@@ -1179,11 +1185,13 @@ void TestApp::DrawSceneToSSAONormalDepthMap()
 	{
 		XMMATRIX view = XMLoadFloat4x4(&mCamera.mView);
 		XMMATRIX WorldView = obj->mWorld * view;
+		XMMATRIX WorldInverseTranspose = GameMath::InverseTranspose(obj->mWorld);
 
 		SSAO::NormalDepthCB buffer;
 		XMStoreFloat4x4(&buffer.WorldView, WorldView);
 		XMStoreFloat4x4(&buffer.WorldViewProj, WorldView * mCamera.mProj);
-		XMStoreFloat4x4(&buffer.WorldInverseTransposeView, GameMath::InverseTranspose(obj->mWorld) * view);
+		XMStoreFloat4x4(&buffer.WorldInverseTranspose, WorldInverseTranspose);
+		XMStoreFloat4x4(&buffer.WorldInverseTransposeView, WorldInverseTranspose * view);
 		XMStoreFloat4x4(&buffer.TexCoordTransform, obj->mTexCoordTransform);
 		mContext->UpdateSubresource(mSSAO.GetNormalDepthCB(), 0, nullptr, &buffer, 0, 0);
 		mContext->VSSetConstantBuffers(0, 1, &mSSAO.GetNormalDepthCB());
@@ -1782,13 +1790,15 @@ void TestApp::DrawScene()
 
 	if (IsKeyPressed(GLFW_KEY_2))
 	{
-		mShadowMap.mDebugQuad.Draw(mContext, mShadowMap.GetSRV());
+		//mShadowMap.mDebugQuad.Draw(mContext, mShadowMap.GetSRV());
+		//mShadowMap.mDebugQuad.Draw(mContext, mSSR.mHierarchicalDepthBufferSRV);
+		mSSPR.mDebugQuad.Draw(mContext, mSSR.mHierarchicalDepthBufferSRV);
 	}
 
 	if (IsKeyPressed(GLFW_KEY_3))
 	{
-		mSSAO.mDebugQuad.Draw(mContext, mSSAO.GetAmbientMapSRV());
-		//mSSAO.mDebugQuad.Draw(mContext, mSSAO.GetNormalDepthSRV());
+		//mSSAO.mDebugQuad.Draw(mContext, mSSAO.GetAmbientMapSRV());
+		mSSAO.mDebugQuad.Draw(mContext, mSSAO.GetNormalDepthSRV());
 	}
 
 	if (IsKeyPressed(GLFW_KEY_5))

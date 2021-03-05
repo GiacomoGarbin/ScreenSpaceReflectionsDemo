@@ -41,7 +41,7 @@ void SSSR::init(ID3D11Device* device, UINT width, UINT height)
 		std::wstring path = L"SSSR_CS.hlsl";
 
 		ID3DBlob* pCode;
-		HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "cs_5_0", 0, 0, &pCode, nullptr));
+		HR(D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", "cs_5_0", D3DCOMPILE_DEBUG, 0, &pCode, nullptr));
 		HR(device->CreateComputeShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), nullptr, &mComputeShader));
 	}
 
@@ -149,6 +149,7 @@ void SSSR::draw(ID3D11DeviceContext* context, const CameraObject& camera, ID3D11
 		ConstantBuffer buffer;
 
 		XMMATRIX view = XMLoadFloat4x4(&camera.mView);
+		XMStoreFloat4x4(&buffer.view, view);
 
 		{
 			XMVECTOR det = XMMatrixDeterminant(view);

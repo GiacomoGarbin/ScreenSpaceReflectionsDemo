@@ -14,6 +14,7 @@ RWTexture2D<float4> gOutputTexture           : register(u0);
 
 cbuffer ConstantBuffer : register(b0)
 {
+    float4x4 g_view;
     float4x4 g_inv_view;
     float4x4 g_proj;
     float4x4 g_inv_proj;
@@ -139,20 +140,20 @@ float3 Sample_GGX_VNDF_Hemisphere(float3 Ve, float alpha, float U1, float U2)
 float3 SampleReflectionVector(float3 view_direction, float3 normal, float roughness, int2 dispatch_thread_id)
 {
     float3x3 tbn_transform = CreateTBN(normal);
-    float3 view_direction_tbn = mul(tbn_transform, -view_direction);
+    float3 view_direction_tbn = mul(-view_direction, tbn_transform);
 
     float2 u = SampleRandomVector2D(dispatch_thread_id);
 
     float3 sampled_normal_tbn = Sample_GGX_VNDF_Hemisphere(view_direction_tbn, roughness, u.x, u.y);
-//#ifdef PERFECT_REFLECTIONS
-    sampled_normal_tbn = float3(0, 0, 1); // Overwrite normal sample to produce perfect reflection.
-//#endif
+#ifdef PERFECT_REFLECTIONS
+    //sampled_normal_tbn = float3(0, 0, 1); // Overwrite normal sample to produce perfect reflection.
+#endif
 
     float3 reflected_direction_tbn = reflect(-view_direction_tbn, sampled_normal_tbn);
 
     // Transform reflected_direction back to the initial space.
     float3x3 inv_tbn_transform = transpose(tbn_transform);
-    return mul(inv_tbn_transform, reflected_direction_tbn);
+    return mul(reflected_direction_tbn, inv_tbn_transform);
 }
 
 // Mat must be able to transform origin from texture space to a linear space.
@@ -193,11 +194,11 @@ bool IsMirrorReflection(float roughness)
 float3 FFX_SSSR_LoadNormal(int2 pixel_coordinate)
 {
     //return 2 * g_normal.Load(int3(pixel_coordinate, 0)).xyz - 1;
-    //return g_normal.Load(int3(pixel_coordinate, 0)).xyz;
+    return g_normal.Load(int3(pixel_coordinate, 0)).xyz;
 
-    float3 view_space_normal  = g_normal.Load(int3(pixel_coordinate, 0)).xyz;
-    float3 world_space_normal = mul(g_inv_view, float4(normalize(view_space_normal), 0)).xyz;
-    return world_space_normal;
+    //float3 view_space_normal  = g_normal.Load(int3(pixel_coordinate, 0)).xyz;
+    //float3 world_space_normal = mul(g_inv_view, float4(normalize(view_space_normal), 0)).xyz;
+    //return world_space_normal;
 }
 
 void FFX_SSSR_InitialAdvanceRay
@@ -403,8 +404,11 @@ void main(uint3 GroupThreadID : SV_GroupThreadID, uint3 DispatchThreadID : SV_Di
     uint2 coords = DispatchThreadID.xy;
     float2 uv = (coords + 0.5) / screen_size;
 
-    float3 view_space_surface_normal = g_normal.Load(int3(coords, 0)).xyz;
-    float3 world_space_normal = mul(g_inv_view, float4(normalize(view_space_surface_normal), 0)).xyz;
+    //float3 view_space_surface_normal = g_normal.Load(int3(coords, 0)).xyz;
+    //float3 world_space_normal = mul(g_inv_view, float4(normalize(view_space_surface_normal), 0)).xyz;
+    float3 world_space_normal = g_normal.Load(int3(coords, 0)).xyz;
+    float3 view_space_surface_normal = mul(g_view, float4(normalize(world_space_normal), 0)).xyz;
+
     float roughness = 0; // g_roughness.Load(int3(coords, 0));
     bool is_mirror = IsMirrorReflection(roughness);
 

@@ -16,6 +16,7 @@ public:
 
 	struct ConstantBuffer
 	{
+		XMFLOAT4X4 view;
 		XMFLOAT4X4 ViewInverse;
 		XMFLOAT4X4 proj;
 		XMFLOAT4X4 ProjInverse;

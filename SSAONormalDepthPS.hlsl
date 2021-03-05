@@ -2,7 +2,8 @@ struct VertexOut
 {
 	float3 PositionV : POSITION;
 	float4 PositionH : SV_POSITION;
-	float3 NormalV   : NORMAL;
+	float3 NormalW   : NORMAL_WORLD;
+	float3 NormalV   : NORMAL_VIEW;
 	float2 TexCoord  : TEXCOORD;
 };
 
@@ -21,5 +22,5 @@ float4 main(VertexOut pin) : SV_TARGET
 #endif // ENABLE_ALPHA_CLIPPING
 #endif // ENABLE_TEXTURE
 
-	return float4(pin.NormalV, pin.PositionH.z);
+	return float4(pin.NormalW, pin.PositionH.z);
 }
