@@ -193,7 +193,11 @@ bool IsMirrorReflection(float roughness)
 float3 FFX_SSSR_LoadNormal(int2 pixel_coordinate)
 {
     //return 2 * g_normal.Load(int3(pixel_coordinate, 0)).xyz - 1;
-    return g_normal.Load(int3(pixel_coordinate, 0)).xyz;
+    //return g_normal.Load(int3(pixel_coordinate, 0)).xyz;
+
+    float3 view_space_normal  = g_normal.Load(int3(pixel_coordinate, 0)).xyz;
+    float3 world_space_normal = mul(g_inv_view, float4(normalize(view_space_normal), 0)).xyz;
+    return world_space_normal;
 }
 
 void FFX_SSSR_InitialAdvanceRay
@@ -362,9 +366,8 @@ float FFX_SSSR_ValidateHit(float3 hit, float2 uv, float3 world_space_ray_directi
     }
 
     // We check if we hit the surface from the back, these should be rejected.
-    float3 view_space_hit_normal  = FFX_SSSR_LoadNormal(texel_coords);
-    float3 world_space_hit_normal = mul(g_inv_view, float4(normalize(view_space_hit_normal), 0)).xyz;
-    if (dot(world_space_hit_normal, world_space_ray_direction) > 0)
+    float3 hit_normal = FFX_SSSR_LoadNormal(texel_coords);
+    if (dot(hit_normal, world_space_ray_direction) > 0)
     {
         return 0;
     }
@@ -400,7 +403,7 @@ void main(uint3 GroupThreadID : SV_GroupThreadID, uint3 DispatchThreadID : SV_Di
     uint2 coords = DispatchThreadID.xy;
     float2 uv = (coords + 0.5) / screen_size;
 
-    float3 view_space_surface_normal = FFX_SSSR_LoadNormal(coords);
+    float3 view_space_surface_normal = g_normal.Load(int3(coords, 0)).xyz;
     float3 world_space_normal = mul(g_inv_view, float4(normalize(view_space_surface_normal), 0)).xyz;
     float roughness = 0; // g_roughness.Load(int3(coords, 0));
     bool is_mirror = IsMirrorReflection(roughness);
