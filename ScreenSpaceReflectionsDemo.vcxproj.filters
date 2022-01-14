@@ -29,9 +29,6 @@
     <FxCompile Include="SSRCopyDepthBufferCS.hlsl" />
     <FxCompile Include="SSRComputeHierarchicalDepthBufferPS.hlsl" />
     <FxCompile Include="SSRComputeHierarchicalDepthBufferVS.hlsl" />
-    <FxCompile Include="SSSR_CS.hlsl">
-      <Filter>SSSR</Filter>
-    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
